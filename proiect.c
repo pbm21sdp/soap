@@ -34,7 +34,8 @@ date la intrare. Directorul de iesire va avea in fata lui un -o, ca sa fie evide
 #include <errno.h>
 
 // structura care va retine informatiile despre un regular file
-typedef struct fisier{
+typedef struct fisier
+{
     char nume[256];         // numele fisierului
     off_t dimensiune;       // dimensiune totala in bytes
     time_t data_modificare; // momentul ultimei modificari (st_mtim din struct stat)
@@ -42,7 +43,8 @@ typedef struct fisier{
 } fisier;
 
 // structura care va retine informatiile despre un director
-typedef struct director{
+typedef struct director
+{
     char nume[256];         // numele directorului
     off_t dimensiune;       // dimensiune totala in bytes
     time_t data_modificare; // momentul ultimei modificari (st_mtim din struct stat)
@@ -50,8 +52,9 @@ typedef struct director{
 } director;
 
 // structura care va retine informatiile despre o legatura simbolica
-typedef struct legatura_simbolica{
-    char nume[256];         // numele directorului
+typedef struct legatura_simbolica
+{
+    char nume[256];         // numele legaturii simbolice
     off_t dimensiune;       // dimensiune totala in bytes
     time_t data_modificare; // momentul ultimei modificari (st_mtim din struct stat)
     ino_t inode;            // numarul inode-ului
@@ -60,29 +63,31 @@ typedef struct legatura_simbolica{
 void eroare(const char *mesaj) // functie care primeste ca parametru un String si semnaleaza o eroare de executie sau de logica
 {
     perror(mesaj); // afiseaza un mesaj de eroare mai simplu
-    exit(-1);      // termina programul cu un cod de eroare
+    exit(-1); // termina programul cu un cod de eroare
 }
 
 void invalid(const char *mesaj) // functie care primeste ca parametru un String si semnaleaza o "diferenta" intre cerinta si ceea ce am obtinut, dar nu o eroare
 {
-    printf(mesaj);      // afiseaza un mesaj informativ care sa ne atentioneze ca nu respectam cerinta
+    printf(mesaj); // afiseaza un mesaj informativ care sa ne atentioneze ca nu respectam cerinta
     exit(EXIT_SUCCESS); // opreste executia programului pentru ca nu are rost sa o continuam daca nu facem ce se cere, dar nu cu cod de eroare, ci cu cod 0
 }
 
-void parcurgere_recursiva(const char *directorcale, int snapi) // primeste ca parametru numele anumit director si descriptorul pt fisierul de snapshot
+void parcurgere_recursiva(const char *director, int snapi) // primeste ca parametru numele unei entitati si descriptorul pentru fisierul de snapshot
 {
     // 1. pt parcurgerea arborelui se deschide directorul cu functia opendir
 
-    DIR *subdir = opendir(directorcale); // daca subdir este NULL inseamna ca ceva nu a mers cu opendir si am intampinat o eroare
+    DIR *subdir = opendir(director); // daca subdir este NULL inseamna ca ceva nu a mers cu opendir si am intampinat o eroare
 
-    char cale[PATH_MAX];
+    char cale[PATH_MAX]; // folosit pentru a retine fiecare cale nou construita
 
-    if (subdir == NULL)
+    if (subdir == NULL) // opendir returneaza NULL daca a aparut o eroare
     {
-        eroare("Directorul pe care il voiam curent nu a putut fi deschis.");
+        eroare("Directorul pe care il voiam curent nu a putut fi deschis."); // apelam functia eroare si precizam ce mai exact nu a mers
     }
 
-    /*2. se citeste pe rand cate o intrare din director, apeland functia readdir. Fiecare apel al acestei functii va returna un pointer la
+    printf("Directorul a putut fi deschis: %s\n", director); // mesaj afisat in terminal pentru a urmari flow-ul executiei
+
+    /*2. Se citeste pe rand cate o intrare din director, apeland functia readdir. Fiecare apel al acestei functii va returna un pointer la
     o structura struct dirent in care se vor gasi informatii despre intrarea in director citita. Intrarile vor fi parcurse una dupa alta
     pana cand se ajunge la ultima inregistrare. In momentul in care nu mai exista inregistrari in directorul citit, functia readdir va
     returna NULL. Singura informatie care poate fi extrasa (conform POSIX) din structura dirent este numele intrarii in director. Toate
@@ -95,11 +100,17 @@ void parcurgere_recursiva(const char *directorcale, int snapi) // primeste ca pa
     // trebuie sa apelez readdir pana cand ajung la ultima inregistrare din director, dupa care primesc ca return value NULL cand am epuizat inregistrarile
     // readdir returneaza un pointer la o structura struct dirent, deci dst al meu va fi de fapt readdir
 
-    while ((dst = readdir(subdir)) != NULL)
+    while ((dst = readdir(subdir)) != NULL) // parcugrem cat timp exista inregistrari in director
     {
-        sprintf(cale, "%s/%s", directorcale, dst->d_name);
+        if (strcmp(dst->d_name, ".") == 0 || strcmp(dst->d_name, "..") == 0) // verifica daca entitatea curenta este directorul dat ca argument sau "parintele" acestuia
+        {
+            continue; // sare peste acea iteratie pentru a preveni bucla infinita
+        }
 
-        struct stat st;
+        snprintf(cale, sizeof(cale), "%s/%s", director, dst->d_name); // snprintf este folosit pentru a construi calea fiecarei entitati din subarbore (preferat in locul lui sprintf pentru ca snprintf previne depasirea bufferului)
+        printf("Calea entitatii curente este: %s\n", cale); // mesaj afisat in terminal pentru a urmari flow-ul executiei
+
+        struct stat st; // structura care va retine atributele entitatii
 
         if (lstat(cale, &st) == -1) // daca lstat returneaza -1 inseamna ca a aparut o eroare
         {
@@ -109,58 +120,62 @@ void parcurgere_recursiva(const char *directorcale, int snapi) // primeste ca pa
         if (S_ISDIR(st.st_mode) != 0) // verifica daca entitatea curenta este un director
         {
             struct director d; // definim o structura care retine informatii despre un director
-            strcpy(d.nume, dst->d_name);
+            strncpy(d.nume, dst->d_name, sizeof(d.nume));
             d.dimensiune = st.st_size;
             d.data_modificare = st.st_mtime;
             d.inode = st.st_ino;
 
-            char buffer[sizeof(d)];                                                                // initializez un buffer care sa retina toate informatiile pe care vreau sa le scriu in snapshot
-            sprintf(buffer, "%s %ld %ld %ld\n", d.nume, d.dimensiune, d.data_modificare, d.inode); // folosesc sprintf ca sa obtin un string formatat asa cum vreau eu
+            char buffer[5000]; // buffer care va retine informatia formatata
+            snprintf(buffer, sizeof(buffer), "Nume: %s Dimensiune: %ld Modificare: %ld Inode: %ld\n", d.nume, d.dimensiune, d.data_modificare, d.inode); // folosesc snprintf ca sa obtin un string formatat asa cum vreau eu
 
-            ssize_t written_bytes = write(snapi, buffer, sizeof(buffer));
-            if (written_bytes == -1)
+            ssize_t written_bytes = write(snapi, buffer, strlen(buffer)); // scrie in fisier informatia formatata
+            if (written_bytes == -1) // daca am obtinut -1 inseamna ca apelul write() s-a terminat cu eroare
             {
-                eroare("Eroare la scrierea informatiilor despre director in snapshot.");
+                eroare("Eroare la scrierea informatiilor despre director in snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
             }
 
             parcurgere_recursiva(cale, snapi); // daca este director, se apeleaza recursiv functia pentru a parcurge directorul gasit
-        }                                             // concateneaza pt cale
-        else if (S_ISREG(st.st_mode) != 0)            // verifica daca entitatea curenta este un fisier
+        }
+        else if (S_ISREG(st.st_mode) != 0) // verifica daca entitatea curenta este un fisier
         {
             struct fisier fis; // definim o structura care retine informatii despre un fisier regular
-            strcpy(fis.nume, dst->d_name);
+            strncpy(fis.nume, dst->d_name, sizeof(fis.nume));
             fis.dimensiune = st.st_size;
             fis.data_modificare = st.st_mtime;
             fis.inode = st.st_ino;
 
-            char buffer[sizeof(fis)];                                                                      // initializez un buffer care sa retina toate informatiile pe care vreau sa le scriu in snapshot
-            sprintf(buffer, "%s %ld %ld %ld\n", fis.nume, fis.dimensiune, fis.data_modificare, fis.inode); // folosesc sprintf ca sa obtin un string formatat asa cum vreau eu
+            char buffer[5000]; // buffer care va retine informatia formatata
+            snprintf(buffer, sizeof(buffer), "Nume: %s Dimensiune: %ld Modificare: %ld Inode: %ld\n", fis.nume, fis.dimensiune, fis.data_modificare, fis.inode); // folosesc snprintf ca sa obtin un string formatat asa cum vreau eu
 
-            ssize_t written_bytes = write(snapi, buffer, sizeof(buffer));
-            if (written_bytes == -1)
+            ssize_t written_bytes = write(snapi, buffer, strlen(buffer)); // scrie in fisier informatia formatata
+            if (written_bytes == -1) // daca am obtinut -1 inseamna ca apelul write() s-a terminat cu eroare
             {
-                eroare("Eroare la scrierea informatiilor despre fisier in snapshot.");
+                eroare("Eroare la scrierea informatiilor despre fisier in snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
             }
         }
         else if (S_ISLNK(st.st_mode) != 0) // verifica daca entitatea curenta este o legatura simbolica
         {
             struct legatura_simbolica leg; // definim o structura care retine informatii despre o legatura simbolica
-            strcpy(leg.nume, dst->d_name);
+            strncpy(leg.nume, dst->d_name, sizeof(leg.nume));
             leg.dimensiune = st.st_size;
             leg.data_modificare = st.st_mtime;
             leg.inode = st.st_ino;
 
-            char buffer[sizeof(leg)];                                                                      // initializez un buffer care sa retina toate informatiile pe care vreau sa le scriu in snapshot
-            sprintf(buffer, "%s %ld %ld %ld\n", leg.nume, leg.dimensiune, leg.data_modificare, leg.inode); // folosesc sprintf ca sa obtin un string formatat asa cum vreau eu
+            char buffer[5000]; // buffer care va retine informatia formatata                                                                                                                                  
+            snprintf(buffer, sizeof(buffer), "Nume: %s Dimensiune: %ld Modificare: %ld Inode: %ld\n", leg.nume, leg.dimensiune, leg.data_modificare, leg.inode); // folosesc snprintf ca sa obtin un string formatat asa cum vreau eu
 
-            ssize_t written_bytes = write(snapi, buffer, sizeof(buffer));
-            if (written_bytes == -1)
+            ssize_t written_bytes = write(snapi, buffer, strlen(buffer)); // scrie in fisier informatia formatata
+            if (written_bytes == -1) // daca am obtinut -1 inseamna ca apelul write() s-a terminat cu eroare
             {
-                eroare("Eroare la scrierea informatiilor despre legatura simbolica in fisierul snapshot.");
+                eroare("Eroare la scrierea informatiilor despre legatura simbolica in fisierul snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
             }
         }
     }
-    closedir(subdir);
+
+    if (closedir(subdir) == -1) // inchide directorul si verifica daca s-a inchis corect 
+    {
+        eroare("Eroare la inchiderea directorului."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
 }
 
 int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumentelor din linie de comanda, incluzand numele programului executat -> 1 parametru dat -> argc = 2 (un fel de $# din script)
@@ -173,18 +188,17 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
     {
         // daca nr de argumente nu este 1 inseamna ca nu s-a respectat cerinta
         // acesta este un caz de eroare, deci putem apela functia creata eroare anterior cu un mesaj care sa ne anunte ca am introdus un nr diferit de argumente
-        invalid("Numarul de argumente difera de cel asteptat.");
+        invalid("Numarul de argumente difera de cel asteptat."); // apelam functia invalid si precizam ce mai exact nu a potrivit
     }
 
     const char *director = argv[1]; // pointer in care se stocheaza calea directorului dat ca argument
 
     struct stat st; // structura care contine metadata
 
-    printf("Directorul introdus: %s\n", director);
+    printf("Directorul introdus: %s\n", director); // mesaj afisat in terminal pentru a urmari flow-ul executiei
 
     // apelul lstat returneaza 0 in caz de succes, sau -1 in caz de eroare
     // pentru a fi folosit necesita includerea fisierului header sys/stat.header
-
     // folosim apelul lstat pentru directorul primit ca parametru si pasam ca parametru 2 zona de memorie unde vrem sa pastram toate informatiile, adica st
     // lstat este mai useful pentru ca daca este aplicata unei legaturi simbolice, informatiile returnate se vor referi la legatura, si nu la fisierul indicat
 
@@ -198,59 +212,51 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
     // folosim macro-ul S_ISDIR(m) ca sa verificam daca tipul fisierului primit este director
     // in cazul nostru m este st.st_mode
 
-    if (S_ISDIR(st.st_mode) == 0) // daca valoarea returnata nu este 0 inseamna ca nu am primit ca argument un director
+    if (S_ISDIR(st.st_mode) == 0) // daca valoarea returnata este 0 inseamna ca nu am primit ca argument un director
     {
         invalid("Argumentul introdus nu este un director."); // faptul ca nu am primit ca arg un director nu e o eroare, doar nu face ce vreau eu -> doar invalid, nu eroare
     }
 
     // daca nu s-a oprit din executie programul inseamna ca am primit ca argument un director, deci pana acum respectam cerinta
-    // urmatorul pas este sa deschidem acest director folosind functia opendir cu director ca parametru
-    // opendir returneaza NULL in caz de eroare sau o referinta la o structura dedicata de tip DIR in caz de succes
-    // definim noi un pointer la o structura de tip DIR, care va prelua valoarea returnata de opendir
-
-    /*DIR *direct = opendir(director); // multe dir asa ca am pus direct ca sa le mai deosebesc intre ele
-
-    // daca direct este NULL inseamna ca ceva nu a mers cu opendir si am intampinat o eroare
-
-    if (direct == NULL)
-    {
-        eroare("Eroare la deschiderea directorului, s-a intamplat ceva cu opendir."); // clar n-a mers opendir deci nu pot sa deschid directorul si sa ma uit prin el
-    }*/
-
-    // daca pana acuma programul nu s-a oprit din executie inseamna ca am respectat cerintele si n-am dat de erori
-    // pana aici ar trebui sa am un singur arg in linia de comanda adica directorul pe care vreau sa il verific
-    // ar trebui sa am o confirmare ca am putut sa aflu metadata cu lstat
-    // ar trebui sa am o confirmare ca este director
-    // ar trebui sa am o confirmare ca pot sa il si deschid
+    
 
     // urmeaza sa fac o functie care sa parcurga in mod recursiv directorul si sa adune date despre orice are in el
     // am nevoie de fisierul snapshot
-    // ca sa il creez si deschid folosesc functia creat (const char *pathname, mode_t mode);
+    // ca sa il creez si deschid folosesc apelul open()
 
-    const char *nume_snapshot = "snap.txt";             // numele fisierului snapshot este snap.txt
+    const char *nume_snapshot = "snap.txt"; // numele fisierului snapshot este snap.txt
     mode_t mod = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH; // intr-o variabila de tip mode_t stochez permisiunile pt acest fisier snap si anume: read si write pt user, doar read pt group si other
     // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
 
-    // in caz de succes, creat returneaza un descriptor de fisier
+    // in caz de succes, open returneaza un descriptor de fisier
     // in caz de eroare, returneaza -1
 
-    int snapi = open(nume_snapshot, O_WRONLY | O_CREAT | O_TRUNC, mod); //deschide fisierul snapshot.txt numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters
+    int snapi = open(nume_snapshot, O_WRONLY | O_CREAT | O_APPEND | O_TRUNC, mod); // deschide fisierul snap.txt numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
     if (snapi == -1)
     {
         eroare("Eroare la crearea si/sau deschiderea fisierului de snapshot."); // ori nu s-a creat, ori nu s-a deschis, cert e ca n-a mers
     }
 
+    printf("Fisierul a fost creat cu succes: snap.txt\n"); // mesaj afisat in terminal pentru a urmari flow-ul executiei
+
+    struct director dir; // structura care va retine informatiile despre directorul dat ca argument 
+    dir.dimensiune = st.st_size;
+    dir.data_modificare = st.st_mtime;
+    dir.inode = st.st_ino;
+
+    char buffer[5000]; // buffer care va retine informatia formatata                 
+    snprintf(buffer, sizeof(buffer), "Nume: %s Dimensiune: %ld Modificare: %ld Inode: %ld\n", director, dir.dimensiune, dir.data_modificare, dir.inode); // folosesc snprintf ca sa obtin un string formatat asa cum vreau eu
+
+    ssize_t written_bytes = write(snapi, buffer, strlen(buffer)); // scrie in fisier informatia formatata
+    if (written_bytes == -1) // daca am obtinut -1 inseamna ca apelul write() s-a terminat cu eroare
+    {
+        eroare("Eroare la scrierea informatiilor despre director in snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
     // apelez functia mea recursiva care parcurge subarborele
     parcurgere_recursiva(director, snapi);
-    // inchid directorul dupa ce am ajuns la finalul programului
-    // closedir returneaza 0 in caz de succes, -1 in caz de eroare
 
-    /*if (closedir(direct) == -1)
-    {
-        eroare("Eroare la inchiderea directorului."); // self-explanatory
-    }*/
-
-    // inchid si fisierul de snapshot pentru ca am adaugat tot ce era nevoie in el
+    // inchid fisierul de snapshot pentru ca am adaugat tot ce era nevoie in el
     // functia close returneaza 0 in caz de succes, -1 in caz de eroare
 
     if (close(snapi) == -1)
