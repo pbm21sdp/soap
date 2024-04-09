@@ -20,7 +20,16 @@ date la intrare. Directorul de iesire va avea in fata lui un -o, ca sa fie evide
 5. - verificam si size-ul, dar si data ultimei modificari
 - rename, edit, delete, move, add -> modificari care pot afecta fisierele
 - nume, inode, dimensiune, data unei modificari -> necesitati care trebuie sa fie trecute in snapshot
-6. la fiecare rulare, ne extragem datele de care avem nevoie si le adaugam la snapshot*/
+6. la fiecare rulare, ne extragem datele de care avem nevoie si le adaugam la snapshot
+
+Se va actualiza funcționalitatea programului în așa fel încât acesta să primească un număr nespecificat de argumente în linia de comandă, dar nu mai mult de 10, cu
+mențiunea că niciun argument nu se va repeta. Programul va procesa numai directoarele, alte tipuri de argumente vor fi ignorate. Logica de captură a metadatelor se va 
+aplica acum tuturor argumentelor primite valide, ceea ce înseamnă că programul va actualiza snapshot-urile pentru toate directoarele specificate de utilizator.
+În cazul în care se vor înregistra modificări la nivelul directoarelor, utilizatorul va putea să compare snapshot-ul anterior al directorului specificat cu cel curent. 
+În cazul în care există diferențe între cele două snapshot-uri, snapshot-ul vechi va fi actualizat cu noile informații din snapshot-ul curent.
+Funcționalitatea codului va fi extinsă astfel încât programul să primească un argument suplimentar, care va reprezenta directorul de ieșire, în care vor fi stocate 
+toate snapshot-urile intrărilor din directoarele specificate în linia de comandă. Acest director de ieșire va fi specificat folosind opțiunea '-O'. De exemplu, comanda 
+de rulare a programului va fi: '/program_exe -o output input1 input2*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -178,90 +187,133 @@ void parcurgere_recursiva(const char *director, int snapi) // primeste ca parame
     }
 }
 
-int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumentelor din linie de comanda, incluzand numele programului executat -> 1 parametru dat -> argc = 2 (un fel de $# din script)
+int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumentelor din linie de comanda, incluzand numele programului executat 
 // arguments vector(argv) este un vector de String-uri care contine cate un argument pe fiecare pozitie incepand cu 0, unde se afla numele executabilului
-//-> numele directorului meu va fi pe pozitia 1, deci argv[1]
+// pot avea maxim 10 argumente? cred nu prea stiu daca 10 cu tot cu ./prog sau nu
 {
-    // se asteapta un nume de director dat ca argument, deci argc trebuie sa fie 2
+    // se asteapta 10 nume de directoare date ca argumente, deci argc trebuie sa fie minim 3 (pentru ./prog, -o si output) si maxim 10? cred
 
-    if (argc != 2) // verificam daca argc este diferit de 2
+    if (argc < 3 || argc > 10) // verificam daca argc este diferit mai mic decat 3 sau mai mare decat 10 si depaseste limitele impuse de noi
     {
         // daca nr de argumente nu este 1 inseamna ca nu s-a respectat cerinta
         // acesta este un caz de eroare, deci putem apela functia creata eroare anterior cu un mesaj care sa ne anunte ca am introdus un nr diferit de argumente
         invalid("Numarul de argumente difera de cel asteptat."); // apelam functia invalid si precizam ce mai exact nu a potrivit
     }
 
-    const char *director = argv[1]; // pointer in care se stocheaza calea directorului dat ca argument
+    int i; // variabila care va fi folosita pe post de iterator 
+    int index_output = -1; // variabila care va retine pozitia directorului de output intre cele 10 argumente
 
-    struct stat st; // structura care contine metadata
-
-    printf("Directorul introdus: %s\n", director); // mesaj afisat in terminal pentru a urmari flow-ul executiei
-
-    // apelul lstat returneaza 0 in caz de succes, sau -1 in caz de eroare
-    // pentru a fi folosit necesita includerea fisierului header sys/stat.header
-    // folosim apelul lstat pentru directorul primit ca parametru si pasam ca parametru 2 zona de memorie unde vrem sa pastram toate informatiile, adica st
-    // lstat este mai useful pentru ca daca este aplicata unei legaturi simbolice, informatiile returnate se vor referi la legatura, si nu la fisierul indicat
-
-    if (lstat(director, &st) == -1) // daca lstat returneaza -1 inseamna ca a aparut o eroare
+    for(i = 1; i < argc; i++) // iteram prin argumente pentru a gasi "-o"
     {
-        eroare("Eroare la determinarea informatiilor despre director, ceva s-a intamplat cu lstat."); // apelam functia eroare si precizam ce mai exact nu a mers
+        if ((strcmp(argv[i], "-o") == 0) || (strcmp(argv[i], "-O") == 0)) // comparam fiecare argument (argv[i]) cu "-o" sau "-O" pentru a gasi indexul
+        {
+            if (i + 1 >= argc) // daca l-am gasit dar depasim numarul posibil de argumente e clar ca "-o" este ultimul si nu mai exista si director de output
+            {
+                eroare("Nu exista si directorul de output printre argumente."); // apelam functia eroare si precizam ce mai exact nu a mers
+            }
+
+            index_output = i + 1; // indexul directorului de output este cu 1 mai mare decat cel al lui "-o", pentru ca succede acest indicator
+            break; // daca am gasit indexul cautat intrerupem iteratia 
+        }
     }
 
-    // daca nu s-a oprit din executie programul inseamna ca apelul lstat a reusit, deci am obtinut informatii despre director
-    // prin intermediul campului st_mode din st, putem verifica daca intr-adevar am primit un director ca parametru sau daca avem altceva
-    // folosim macro-ul S_ISDIR(m) ca sa verificam daca tipul fisierului primit este director
-    // in cazul nostru m este st.st_mode
-
-    if (S_ISDIR(st.st_mode) == 0) // daca valoarea returnata este 0 inseamna ca nu am primit ca argument un director
+    if (index_output == -1) // daca indexul a ramas tot la valoarea data de noi, inseamna ca nu s-a gasit nici -o nici directorul
     {
-        invalid("Argumentul introdus nu este un director."); // faptul ca nu am primit ca arg un director nu e o eroare, doar nu face ce vreau eu -> doar invalid, nu eroare
+        eroare("Nu s-a precizat optiunea -o, deci nu se poate determina directorul de output."); // apelam functia eroare si precizam ce mai exact nu a mers 
     }
 
-    // daca nu s-a oprit din executie programul inseamna ca am primit ca argument un director, deci pana acum respectam cerinta
-    
+    const char *output = argv[index_output]; // pointer in care se stocheaza numele directorului de output
 
-    // urmeaza sa fac o functie care sa parcurga in mod recursiv directorul si sa adune date despre orice are in el
-    // am nevoie de fisierul snapshot
-    // ca sa il creez si deschid folosesc apelul open()
+    printf("Indexul lui -o este %d.\n", (index_output - 1)); // mesaj afisat in terminal pentru a urmari flow-ul executiei
+    printf("Indexul directorului de output este %d.\n", index_output); // mesaj afisat in terminal pentru a urmari flow-ul executiei
 
-    const char *nume_snapshot = "snap.txt"; // numele fisierului snapshot este snap.txt
-    mode_t mod = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH; // intr-o variabila de tip mode_t stochez permisiunile pt acest fisier snap si anume: read si write pt user, doar read pt group si other
-    // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
+    struct stat out; // structura care contine metadata directorului de output
 
-    // in caz de succes, open returneaza un descriptor de fisier
-    // in caz de eroare, returneaza -1
-
-    int snapi = open(nume_snapshot, O_WRONLY | O_CREAT | O_APPEND | O_TRUNC, mod); // deschide fisierul snap.txt numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
-    if (snapi == -1)
+    if(lstat(output, &out) == -1) // daca lstat returneaza -1 inseamna ca a aparut o eroare
     {
-        eroare("Eroare la crearea si/sau deschiderea fisierului de snapshot."); // ori nu s-a creat, ori nu s-a deschis, cert e ca n-a mers
+         eroare("Eroare la determinarea informatiilor despre directorul de output, ceva s-a intamplat cu lstat."); // apelam functia eroare si precizam ce mai exact nu a mers
     }
 
-    printf("Fisierul a fost creat cu succes: snap.txt\n"); // mesaj afisat in terminal pentru a urmari flow-ul executiei
-
-    struct director dir; // structura care va retine informatiile despre directorul dat ca argument 
-    dir.dimensiune = st.st_size;
-    dir.data_modificare = st.st_mtime;
-    dir.inode = st.st_ino;
-
-    char buffer[5000]; // buffer care va retine informatia formatata                 
-    snprintf(buffer, sizeof(buffer), "Nume: %s Dimensiune: %ld Modificare: %ld Inode: %ld\n", director, dir.dimensiune, dir.data_modificare, dir.inode); // folosesc snprintf ca sa obtin un string formatat asa cum vreau eu
-
-    ssize_t written_bytes = write(snapi, buffer, strlen(buffer)); // scrie in fisier informatia formatata
-    if (written_bytes == -1) // daca am obtinut -1 inseamna ca apelul write() s-a terminat cu eroare
+    if(S_ISDIR(out.st_mode) == 0) // daca valoarea returnata este 0 inseamna ca nu am primit ca argument un director
     {
-        eroare("Eroare la scrierea informatiilor despre director in snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
+        invalid("Nu a fost dat ca argument un director pentru output, este dat un fisier sau o legatura simbolica."); // faptul ca nu am primit ca arg un director nu e o eroare, doar nu face ce vreau eu -> doar invalid, nu eroare
     }
 
-    // apelez functia mea recursiva care parcurge subarborele
-    parcurgere_recursiva(director, snapi);
-
-    // inchid fisierul de snapshot pentru ca am adaugat tot ce era nevoie in el
-    // functia close returneaza 0 in caz de succes, -1 in caz de eroare
-
-    if (close(snapi) == -1)
+    for(i = 1; i < argc; i++) // iteram prin argumente 
     {
-        eroare("Eroare la inchiderea snapshot-ului."); // alta self-explanatory
+        if((i == index_output) || (i == index_output - 1)) // daca ne aflam pe pozitia lui "-o" sau a directorului de output dam skip, pentru ca nu vrem sa afisam informatii despre acestea 
+        {
+            continue;
+        }
+
+        const char *director = argv[i]; // pointer in care se stocheaza numele directorului argument curent
+        struct stat st; // structura care contine metadata
+        struct director dir; // structura care va retine informatiile despre directorul argument 
+
+        printf("Directorul introdus: %s\n", director); // mesaj afisat in terminal pentru a urmari flow-ul executiei
+
+        // apelul lstat returneaza 0 in caz de succes, sau -1 in caz de eroare
+        // pentru a fi folosit necesita includerea fisierului header sys/stat.header
+        // folosim apelul lstat pentru directorul primit ca parametru si pasam ca parametru 2 zona de memorie unde vrem sa pastram toate informatiile, adica st
+        // lstat este mai useful pentru ca daca este aplicata unei legaturi simbolice, informatiile returnate se vor referi la legatura, si nu la fisierul indicat
+
+        if(lstat(director, &st) == -1) // daca lstat returneaza -1 inseamna ca a aparut o eroare
+        {
+            eroare("Eroare la determinarea informatiilor despre director, ceva s-a intamplat cu lstat."); // apelam functia eroare si precizam ce mai exact nu a mers
+        }
+
+        // daca nu s-a oprit din executie programul inseamna ca apelul lstat a reusit, deci am obtinut informatii despre director
+        // prin intermediul campului st_mode din st, putem verifica daca intr-adevar am primit un director ca parametru sau daca avem altceva
+        // folosim macro-ul S_ISDIR(m) ca sa verificam daca tipul fisierului primit este director
+        // in cazul nostru m este st.st_mode
+
+        if(S_ISDIR(st.st_mode) == 0) // daca valoarea returnata este 0 inseamna ca nu am primit ca argument un director
+        {
+            printf("Argumentul cu numarul %d nu este un director, deci nu va fi procesat.\n", i); // // mesaj afisat in terminal pentru a urmari flow-ul executiei
+            continue; // daca nu am primit un director ca argument dam skip, dar nu oprim executia
+        }
+
+        char nume_snapshot[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor de snapshot
+        snprintf(nume_snapshot, sizeof(nume_snapshot), "%s/snapshot_%s.txt", output, director); // snprintf construieste calea fiecarui fisier de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
+
+        int snap = open(nume_snapshot, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP); // deschide fisierul snap.txt numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
+        // permisiunile pentru acest fisier snap sunt: read si write pt user, doar read pt group si other
+        // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
+        // in caz de succes, open returneaza un descriptor de fisier
+        // in caz de eroare, returneaza -1
+
+        if (snap == -1)
+        {
+            eroare("Eroare la crearea si/sau deschiderea fisierului de snapshot."); // ori nu s-a creat, ori nu s-a deschis, cert e ca n-a mers
+        }
+
+        printf("Fisierul a fost creat cu succes: %s\n", nume_snapshot); // mesaj afisat in terminal pentru a urmari flow-ul executiei
+
+        // stocam informatiile directorului argument 
+
+        dir.dimensiune = st.st_size;
+        dir.data_modificare = st.st_mtime;
+        dir.inode = st.st_ino;
+
+        char buffer[5000]; // buffer care va retine informatia formatata                 
+        snprintf(buffer, sizeof(buffer), "Nume: %s Dimensiune: %ld Modificare: %ld Inode: %ld\n", director, dir.dimensiune, dir.data_modificare, dir.inode); // folosesc snprintf ca sa obtin un string formatat asa cum vreau eu
+
+        ssize_t written_bytes = write(snap, buffer, strlen(buffer)); // scrie in fisier informatia formatata
+        if(written_bytes == -1) // daca am obtinut -1 inseamna ca apelul write() s-a terminat cu eroare
+        {
+            eroare("Eroare la scrierea informatiilor despre director in snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
+        }
+
+        // apelez functia mea recursiva care parcurge subarborele
+        parcurgere_recursiva(director, snap);
+
+        // inchid fisierul de snapshot pentru ca am adaugat tot ce era nevoie in el
+        // functia close returneaza 0 in caz de succes, -1 in caz de eroare
+
+        if (close(snap) == -1)
+        {
+            eroare("Eroare la inchiderea snapshot-ului."); // alta self-explanatory
+        }
     }
 
     return 0;
