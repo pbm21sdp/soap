@@ -243,6 +243,56 @@ void parcurgere_recursiva(const char *director, int snapi)
     }
 }
 
+int compara_snapi(const char *snapshot_vechi, const char *snapshot_nou)
+{
+    int snap_vechi = open(snapshot_vechi, O_RDONLY, S_IRUSR | S_IROTH | S_IRGRP);
+
+    if (snap_vechi == -1)
+    {
+        eroare("Fisierul vechi de snapshot nu a putut fi deschis.");
+    }
+
+    int snap_nou = open(snapshot_nou, O_RDONLY, S_IRUSR | S_IROTH | S_IRGRP);
+
+    if (snap_nou == -1)
+    {
+        eroare("Fisierul nou de snapshot nu a putut fi deschis.");
+    }
+
+    char linie_veche[5000];
+    char linie_noua[5000];
+    ssize_t bytes_cititi_vechi, bytes_cititi_nou;
+
+    while ((bytes_cititi_vechi = read(snap_vechi, linie_veche, sizeof(linie_veche))) > 0 && (bytes_cititi_nou = read(snap_nou, linie_noua, sizeof(linie_noua))) > 0)
+    {
+        if (bytes_cititi_vechi != bytes_cititi_nou || memcmp(linie_veche, linie_noua, bytes_cititi_vechi) != 0)
+        {
+            if ((close(snap_nou) == -1) || (close(snap_vechi) == -1))
+            {
+                eroare("Eroare la inchiderea snapshot-urilor.");
+            }
+            return 1;
+        }
+    }
+
+    if (bytes_cititi_vechi == -1 || bytes_cititi_nou == -1)
+    {
+        eroare("Eroare la citirea din fisierele de snapshot.");
+    }
+
+    if (close(snap_vechi) == -1)
+    {
+        eroare("Eroare la inchiderea snapshot-ului vechi.");
+    }
+
+    if (close(snap_nou) == -1)
+    {
+        eroare("Eroare la inchiderea snapshot-ului nou.");
+    }
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     fisier_com = fopen("flow_executie.txt", "w");
@@ -335,15 +385,37 @@ int main(int argc, char *argv[])
         }
 
         char nume_snapshot[PATH_MAX];
+        char nume_snapshot_temporar[PATH_MAX];
+        char nume_snapshot_vechi[PATH_MAX];
+
         snprintf(nume_snapshot, sizeof(nume_snapshot), "%s/snapshot_%s.txt", output, director);
+        snprintf(nume_snapshot_temporar, sizeof(nume_snapshot_temporar), "%s/snapshot_%s_temp.txt", output, director);
+        snprintf(nume_snapshot_vechi, sizeof(nume_snapshot_vechi), "%s/snapshot_%s_old.txt", output, director);
 
-        int snap = open(nume_snapshot, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP);
-        if (snap == -1)
+        int snap = open(nume_snapshot, O_RDONLY);
+
+        if (snap < 0)
         {
-            eroare("Fisierul nu a putut fi deschis/creat.");
-        }
+            snap = open(nume_snapshot, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP);
 
-        fprintf(fisier_com, "Fisierul a fost creat cu succes: %s\n", nume_snapshot);
+            if (snap == -1)
+            {
+                eroare("Fisierul nu a putut fi deschis/creat.");
+            }
+
+            fprintf(fisier_com, "Fisierul de snapshot a fost creat cu succes: %s.\n", nume_snapshot);
+        }
+        else
+        {
+            snap = open(nume_snapshot_temporar, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP);
+
+            if (snap == -1)
+            {
+                eroare("Fisierul nu a putut fi deschis/creat.");
+            }
+
+            fprintf(fisier_com, "Fisierul temporar a fost creat cu succes: %s.\n", nume_snapshot_temporar);
+        }
 
         dir.dimensiune = st.st_size;
         dir.data_modificare = st.st_mtime;
@@ -357,16 +429,54 @@ int main(int argc, char *argv[])
         snprintf(buffer, sizeof(buffer), "Director initial\nNume: %s\nDimensiune: %ld bytes\nModificare: %sUltima accesare: %sInode: %ld\nPermisiuni: %s\n\n", director, dir.dimensiune, modificare_initial, accesare_initial, dir.inode, p_init);
 
         ssize_t written_bytes = write(snap, buffer, strlen(buffer));
-        if (written_bytes == -1)
+        if(written_bytes == -1)
         {
             eroare("Eroare la scrierea informatiilor despre director in snapshot.");
         }
 
         parcurgere_recursiva(director, snap);
 
-        if (close(snap) == -1)
+        if(close(snap) == -1)
         {
             eroare("Eroare la inchiderea snapshot-ului.");
+        }
+
+        snap = open(nume_snapshot_temporar, O_RDONLY);
+
+        if(snap >= 0)
+        { 
+            if(close(snap) == -1)
+            {
+                eroare("Eroare la inchiderea fisierului temporar.");
+            }
+
+            if(compara_snapi(nume_snapshot, nume_snapshot_temporar) == 1)
+            {
+                if(rename(nume_snapshot, nume_snapshot_vechi) != 0)
+                {
+                    eroare("Nu s-a putut redenumi fisierul curent ca cel vechi.");
+                }
+
+                if(rename(nume_snapshot_temporar, nume_snapshot) != 0)
+                {
+                    eroare("Nu s-a putut redenumi fisierul temporar ca cel curent.");
+                }
+
+                fprintf(fisier_com, "Au fost detectate modificari: %s a fost redenumit %s\n", nume_snapshot, nume_snapshot_vechi);
+            }
+            else
+            {
+                if (unlink(nume_snapshot_temporar) == -1)
+                {
+                    eroare("Nu s-a putut sterge snapshot-ul temporar.");
+                }
+
+                fprintf(fisier_com, "Nu a aparut nici o modificare in directorul %s.\n", director);
+            }
+        }
+        else
+        {
+            fprintf(fisier_com, "Snapshot-ul temporar nu exista, deoarece e prima rulare.\n");
         }
     }
 

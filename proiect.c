@@ -261,6 +261,58 @@ void parcurgere_recursiva(const char *director, int snapi) // primeste ca parame
     }
 }
 
+int compara_snapi(const char *snapshot_vechi, const char *snapshot_nou) // functie de comparare a snapshot-urilor care primeste ca parametrii doua nume de snapshot-uri, unul pentru cel anterior si unul pentru cel curent
+{
+    int snap_vechi = open(snapshot_vechi, O_RDONLY, S_IRUSR | S_IROTH | S_IRGRP); // deschide fisierul anterior de snapshot numai pentru citire (O_RDONLY), iar permisiunile pentru acest fisier sunt read pentru user, other si grup
+
+    // in caz de succes, open returneaza un descriptor de fisier
+    if (snap_vechi == -1) // in caz de eroare returneaza -1
+    {
+        eroare("Fisierul vechi de snapshot nu a putut fi deschis."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
+    int snap_nou = open(snapshot_nou, O_RDONLY, S_IRUSR | S_IROTH | S_IRGRP); // deschide fisierul curent de snapshot numai pentru citire (O_RDONLY), iar permisiunile pentru acest fisier sunt read pentru user, other si grup
+
+    // in caz de succes, open returneaza un descriptor de fisier
+    if (snap_nou == -1) // in caz de eroare returneaza -1
+    {
+        eroare("Fisierul nou de snapshot nu a putut fi deschis."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
+    char buffer_linie_snap_vechi[5000]; // buffer care va retine linia citita din snapshot-ul anterior
+    char buffer_linie_snap_nou[5000]; // buffer care va retine linia citita din snapshot-ul curent
+    ssize_t bytes_cititi_vechi, bytes_cititi_nou; // variabile care retin numarul de bytes cititi din fisierele de snapshot
+
+    while ((bytes_cititi_vechi = read(snap_vechi, buffer_linie_snap_vechi, sizeof(buffer_linie_snap_vechi))) > 0 && (bytes_cititi_nou = read(snap_nou, buffer_linie_snap_nou, sizeof(buffer_linie_snap_nou))) > 0) // cat timp se citesc linii din fisierele de snapshot, se verifica linie cu linie si se compara continutul
+    {
+        if (bytes_cititi_vechi != bytes_cititi_nou || memcmp(buffer_linie_snap_vechi, buffer_linie_snap_nou, bytes_cititi_vechi) != 0) //  daca numarul de bytes cititi sau continutul lor difera, snapshot-urile sunt diferite
+        {
+            if ((close(snap_nou) == -1) || (close(snap_vechi) == -1)) // inchide fisierele de snapshot si verifica daca s-au inchis corect
+            {
+                eroare("Eroare la inchiderea snapshot-urilor."); // apelam functia eroare si precizam ce mai exact nu a mers
+            }
+            return 1; // acest 1 va indica faptul ca snapshot-urile sunt diferite
+        }
+    }
+
+    if (bytes_cititi_vechi == -1 || bytes_cititi_nou == -1) // daca am obtinut -1 inseamna ca apelul read() s-a terminat cu eroare
+    {
+        eroare("Eroare la citirea din fisierele de snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
+    if (close(snap_vechi) == -1) // inchide fisierul anterior de snapshot si verifica daca s-a inchis corect
+    {
+        eroare("Eroare la inchiderea snapshot-ului vechi."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
+    if (close(snap_nou) == -1) // inchide fisierul curent de snapshot si verifica daca s-a inchis corect
+    {
+        eroare("Eroare la inchiderea snapshot-ului nou."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
+    return 0; // acest 0 va indica faptul ca snapshot-urile sunt identice
+}
+
 int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumentelor din linie de comanda, incluzand numele programului executat
 // arguments vector(argv) este un vector de String-uri care contine cate un argument pe fiecare pozitie incepand cu 0, unde se afla numele executabilului
 // pot avea maxim 10 argumente date ca parametru, 13 cu tot cu ./prog, -o si output
@@ -337,7 +389,7 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
     {
         if ((i == index_output) || (i == index_output - 1)) // daca ne aflam pe pozitia lui "-o" sau a directorului de output dam skip, pentru ca nu vrem sa afisam informatii despre acestea
         {
-            continue;
+            continue; // trecem la urmatoarea iteratie
         }
 
         const char *director = argv[i]; // pointer in care se stocheaza numele directorului argument curent
@@ -368,19 +420,43 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
         }
 
         char nume_snapshot[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor de snapshot
+        char nume_snapshot_temporar[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor temporare de snapshot
+        char nume_snapshot_vechi[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor anterioare de snapshot
+
         snprintf(nume_snapshot, sizeof(nume_snapshot), "%s/snapshot_%s.txt", output, director); // snprintf construieste calea fiecarui fisier de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
+        snprintf(nume_snapshot_temporar, sizeof(nume_snapshot_temporar), "%s/snapshot_%s_temp.txt", output, director); // snprintf construieste calea fiecarui fisier temporar de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
+        snprintf(nume_snapshot_vechi, sizeof(nume_snapshot_vechi), "%s/snapshot_%s_old.txt", output, director); // snprintf construieste calea fiecarui fisier anterior de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
 
-        int snap = open(nume_snapshot, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP); // deschide fisierul snap.txt numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
-        // permisiunile pentru acest fisier snap sunt: read si write pt user, doar read pt group si other
-        // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
-        // in caz de succes, open returneaza un descriptor de fisier
+        int snap = open(nume_snapshot, O_RDONLY); // deschide fisierul curent de snapshot numai pentru citire (O_RDONLY)
 
-        if (snap == -1) // in caz de eroare, returneaza -1
+        if (snap < 0) // daca open a returnat o valoare negativa inseamna ca fisierul meu curent de snapshot e inexistent, deci ori sunt la prima iteratie, ori pana acum au fost erori
         {
-            eroare("Eroare la crearea si/sau deschiderea fisierului de snapshot."); // ori nu s-a creat, ori nu s-a deschis, cert e ca n-a mers
-        }
+            snap = open(nume_snapshot, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP); // deschide fisierul curent de snapshot numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
+            // permisiunile pentru acest fisier snap sunt: read si write pentru user, doar read pentru group si other
+            // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
+            // in caz de succes, open returneaza un descriptor de fisier
 
-        fprintf(fisier_com, "Fisierul a fost creat cu succes: %s\n", nume_snapshot); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+            if (snap == -1) // in caz de eroare returneaza -1
+            {
+                eroare("Fisierul nu a putut fi deschis/creat."); // apelam functia eroare si precizam ce mai exact nu a mers
+            }
+
+            fprintf(fisier_com, "Fisierul de snapshot a fost creat cu succes: %s.\n", nume_snapshot); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+        }
+        else // daca open a returnat o valoare nenegativa inseamna ca aveam deja un fisier de snapshot din rulari anterioare
+        {
+            snap = open(nume_snapshot_temporar, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP); // deschide fisierul temporar de snapshot numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
+            // permisiunile pentru acest fisier snap sunt: read si write pt user, doar read pt group si other
+            // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
+            // in caz de succes, open returneaza un descriptor de fisier
+
+            if (snap == -1) // in caz de eroare returneaza -1
+            {
+                eroare("Fisierul nu a putut fi deschis/creat."); // apelam functia eroare si precizam ce mai exact nu a mers
+            }
+
+            fprintf(fisier_com, "Fisierul temporar a fost creat cu succes: %s.\n", nume_snapshot_temporar); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+        }
 
         // stocam informatiile directorului argument
 
@@ -410,6 +486,44 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
         if (close(snap) == -1)
         {
             eroare("Eroare la inchiderea snapshot-ului."); // alta self-explanatory
+        }
+
+        snap = open(nume_snapshot_temporar, O_RDONLY); // deschide fisierul temporar de snapshot numai pentru citire (O_RDONLY)
+
+        if(snap >= 0) // daca open a returnat o valoare nenegativa, inseamna ca exista un fisier temporar de snapshot, deci clar si un snapshot anterior
+        { 
+            if(close(snap) == -1) // inchid fisierul temporar de snapshot pentru ca am determinat daca exista sau nu si tin cont ca functia close returneaza 0 in caz de succes, -1 in caz de eroare
+            {
+                eroare("Eroare la inchiderea fisierului temporar."); // apelam functia eroare si precizam ce mai exact nu a mers
+            }
+
+            if(compara_snapi(nume_snapshot, nume_snapshot_temporar) == 1) // apelez functia de comparare a snapshot-urilor si verific daca returneaza 1, adica daca imi spune ca snapshot-urile sunt diferite
+            {
+                if(rename(nume_snapshot, nume_snapshot_vechi) != 0) // folosesc un principiu ca al functiei void swap, unde fisierul curent devine "vechi"
+                {
+                    eroare("Nu s-a putut redenumi fisierul curent ca cel vechi."); // apelam functia eroare si precizam ce mai exact nu a mers
+                }
+
+                if(rename(nume_snapshot_temporar, nume_snapshot) != 0) // fisierul temporar devine cel curent
+                {
+                    eroare("Nu s-a putut redenumi fisierul temporar ca cel curent."); // apelam functia eroare si precizam ce mai exact nu a mers
+                }
+
+                fprintf(fisier_com, "Au fost detectate modificari: %s a fost redenumit %s\n", nume_snapshot, nume_snapshot_vechi); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+            }
+            else // daca functia mea de comparare a returnat 0, inseamna ca fisierele mele sunt identice si nu mai am nevoie de snapshot-ul temporar 
+            {
+                if (unlink(nume_snapshot_temporar) == -1) // incerc sa sterg fisierul temporar si verific daca stergerea s-a produs cu succes, daca nu, va returna -1
+                {
+                    eroare("Nu s-a putut sterge snapshot-ul temporar."); // apelam functia eroare si precizam ce mai exact nu a mers
+                }
+
+                fprintf(fisier_com, "Nu a aparut nici o modificare in directorul %s.\n", director); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+            }
+        }
+        else // daca open a returnat o valoare negativa inseamna ca nu s-a putut deschide fisierul temporar, deci fie este inexistent si ma aflu la prima rulare, fie au aparut erori
+        {
+            fprintf(fisier_com, "Snapshot-ul temporar nu exista, deoarece e prima rulare.\n"); // mesaj afisat in fisier pentru a urmari flow-ul executiei
         }
     }
 
