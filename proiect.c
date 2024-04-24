@@ -335,6 +335,7 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
     int i; // variabila care va fi folosita pe post de iterator
     int j; // variabila care va fi folosita pe post de iterator
     int index_output = -1; // variabila care va retine pozitia directorului de output intre cele 10 argumente
+    int index_izolare = -1; // variabila care va retine pozitia directorului de izolare intre cele 10 argumente
 
     for (i = 1; i < argc; i++) // iteram prin argumente in bucla exterioara
     {
@@ -349,11 +350,11 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
 
     fprintf(fisier_com, "Nu există argumente repetitive.\n"); // mesaj afisat in fisier pentru a urmari flow-ul executiei
 
-    for (i = 1; i < argc; i++) // iteram prin argumente pentru a gasi "-o"
+    for(i = 1; i < argc; i++) // iteram prin argumente pentru a gasi "-o"
     {
-        if ((strcmp(argv[i], "-o") == 0) || (strcmp(argv[i], "-O") == 0)) // comparam fiecare argument (argv[i]) cu "-o" sau "-O" pentru a gasi indexul
+        if((strcmp(argv[i], "-o") == 0) || (strcmp(argv[i], "-O") == 0)) // comparam fiecare argument (argv[i]) cu "-o" sau "-O" pentru a gasi indexul
         {
-            if ((i + 1) >= argc) // daca l-am gasit dar depasim numarul posibil de argumente e clar ca "-o" este ultimul si nu mai exista si director de output
+            if((i + 1) >= argc) // daca l-am gasit dar depasim numarul posibil de argumente e clar ca "-o" este ultimul si nu mai exista si director de output
             {
                 eroare("Nu exista si directorul de output printre argumente."); // apelam functia eroare si precizam ce mai exact nu a mers
             }
@@ -363,15 +364,37 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
         }
     }
 
-    if (index_output == -1) // daca indexul a ramas tot la valoarea data de noi, inseamna ca nu s-a gasit nici -o nici directorul
+    if (index_output == -1) // daca indexul a ramas tot la valoarea data de noi, inseamna ca nu s-a gasit nici -o, nici directorul
     {
         eroare("Nu s-a precizat optiunea -o, deci nu se poate determina directorul de output."); // apelam functia eroare si precizam ce mai exact nu a mers
     }
 
+    for(i = 1; i < argc; i++) // iteram prin argumente pentru a gasi "-s"
+    {
+        if((strcmp(argv[i], "-s") == 0) || (strcmp(argv[i], "-S") == 0)) // comparam fiecare argument (argv[i]) cu "-s" sau "-S" pentru a gasi indexul
+        {
+            if((i + 1) >= argc) // daca l-am gasit dar depasim numarul posibil de argumente e clar ca "-s" este ultimul si nu mai exista si director de output
+            {
+                eroare("Nu exista si directorul de izolare printre argumente."); // apelam functia eroare si precizam ce mai exact nu a mers
+            }
+
+            index_izolare = i + 1; // indexul directorului de izolare este cu 1 mai mare decat cel al lui "-s", pentru ca succede acest indicator
+            break; // daca am gasit indexul cautat intrerupem iteratia
+        }
+    }
+
+    if(index_izolare == -1) // daca indexul a ramas tot la valoarea data de noi, inseamna ca nu s-a gasit nici -s, nici directorul
+    {
+        eroare("Nu s-a precizat optiunea -s, deci nu se poate determina directorul de izolare."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
     const char *output = argv[index_output]; // pointer in care se stocheaza numele directorului de output
+    const char *izolare = argv[index_izolare]; // pointer in care se stocheaza numele directorului de izolare 
 
     fprintf(fisier_com, "Indexul lui -o este %d.\n", (index_output - 1)); // mesaj afisat in fisier pentru a urmari flow-ul executiei
     fprintf(fisier_com, "Indexul directorului de output este %d.\n", index_output); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+    fprintf(fisier_com, "Indexul lui -s este %d.\n", (index_izolare - 1)); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+    fprintf(fisier_com, "Indexul directorului de izolare este %d.\n", index_izolare); // mesaj afisat in fisier pentru a urmari flow-ul executiei
 
     struct stat out; // structura care contine metadata directorului de output
 
@@ -385,9 +408,21 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
         invalid(fisier_com, "Nu a fost dat ca argument un director pentru output, este dat un fisier sau o legatura simbolica."); // faptul ca nu am primit ca arg un director nu e o eroare, doar nu face ce vreau eu -> doar invalid, nu eroare
     }
 
+    struct stat izo; // structura care contine metadata directorului de izolare
+
+    if(lstat(izolare, &izo) == -1) // daca lstat returneaza -1 inseamna ca a aparut o eroare
+    {
+        eroare("Eroare la determinarea informatiilor despre directorul de izolare, ceva s-a intamplat cu lstat."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
+    if(S_ISDIR(izo.st_mode) == 0) // daca valoarea returnata este 0 inseamna ca nu am primit ca argument un director
+    {
+        invalid(fisier_com, "Nu a fost dat ca argument un director pentru izolare, este dat un fisier sau o legatura simbolica."); // faptul ca nu am primit ca arg un director nu e o eroare, doar nu face ce vreau eu -> doar invalid, nu eroare
+    }
+
     for (i = 1; i < argc; i++) // iteram prin argumente
     {
-        if ((i == index_output) || (i == index_output - 1)) // daca ne aflam pe pozitia lui "-o" sau a directorului de output dam skip, pentru ca nu vrem sa afisam informatii despre acestea
+        if ((i == index_output) || (i == index_output - 1) || (i == index_izolare) || (i == index_izolare - 1)) // daca ne aflam pe pozitia lui "-o", "-s", a directorului de izolare sau a directorului de output dam skip, pentru ca nu vrem sa afisam informatii despre acestea
         {
             continue; // trecem la urmatoarea iteratie
         }

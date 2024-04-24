@@ -302,7 +302,7 @@ int main(int argc, char *argv[])
         printf("Eroare la deschiderea fisierului care urmareste flow-ul executiei.\n");
     }
 
-    if ((argc < 3) || (argc > 13))
+    if ((argc < 5) || (argc > 15))
     {
         eroare("Numarul de argumente difera de cel asteptat.");
     }
@@ -310,6 +310,7 @@ int main(int argc, char *argv[])
     int i;
     int j;
     int index_output = -1;
+    int index_izolare = -1;
 
     for (i = 1; i < argc; i++)
     {
@@ -324,11 +325,11 @@ int main(int argc, char *argv[])
 
     fprintf(fisier_com, "Nu există argumente repetitive.\n");
 
-    for (i = 1; i < argc; i++)
+    for(i = 1; i < argc; i++)
     {
-        if ((strcmp(argv[i], "-o") == 0) || (strcmp(argv[i], "-O") == 0))
+        if((strcmp(argv[i], "-o") == 0) || (strcmp(argv[i], "-O") == 0))
         {
-            if ((i + 1) >= argc)
+            if((i + 1) >= argc)
             {
                 eroare("Nu exista si directorul de output printre argumente.");
             }
@@ -338,31 +339,65 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (index_output == -1)
+    if(index_output == -1)
     {
         eroare("Nu s-a precizat optiunea -o, deci nu se poate determina directorul de output.");
     }
 
+    for(i = 1; i < argc; i++)
+    {
+        if((strcmp(argv[i], "-s") == 0) || (strcmp(argv[i], "-S") == 0))
+        {
+            if((i + 1) >= argc)
+            {
+                eroare("Nu exista si directorul de izolare printre argumente.");
+            }
+
+            index_izolare = i + 1;
+            break;
+        }
+    }
+
+    if(index_izolare == -1)
+    {
+        eroare("Nu s-a precizat optiunea -s, deci nu se poate determina directorul de izolare.");
+    }
+
     const char *output = argv[index_output];
+    const char *izolare = argv[index_izolare];
 
     fprintf(fisier_com, "Indexul lui -o este %d.\n", (index_output - 1));
     fprintf(fisier_com, "Indexul directorului de output este %d.\n", index_output);
+    fprintf(fisier_com, "Indexul lui -s este %d.\n", (index_izolare - 1));
+    fprintf(fisier_com, "Indexul directorului de izolare este %d.\n", index_izolare);
 
     struct stat out;
 
-    if (lstat(output, &out) == -1)
+    if(lstat(output, &out) == -1)
     {
         eroare("Eroare la determinarea informatiilor despre directorul de output, ceva s-a intamplat cu lstat.");
     }
 
-    if (S_ISDIR(out.st_mode) == 0)
+    if(S_ISDIR(out.st_mode) == 0)
     {
         invalid(fisier_com, "Nu a fost dat ca argument un director pentru output, este dat un fisier sau o legatura simbolica.");
     }
 
+    struct stat izo;
+
+    if(lstat(izolare, &izo) == -1)
+    {
+        eroare("Eroare la determinarea informatiilor despre directorul de izolare, ceva s-a intamplat cu lstat.");
+    }
+
+    if(S_ISDIR(izo.st_mode) == 0)
+    {
+        invalid(fisier_com, "Nu a fost dat ca argument un director pentru izolare, este dat un fisier sau o legatura simbolica.");
+    }
+
     for (i = 1; i < argc; i++)
     {
-        if ((i == index_output) || (i == index_output - 1))
+        if ((i == index_output) || (i == index_output - 1) || (i == index_izolare) || (i == index_izolare - 1))
         {
             continue;
         }
