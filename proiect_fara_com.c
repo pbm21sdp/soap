@@ -59,7 +59,7 @@ const char *prelucrare_permisiuni(struct stat st)
     static char permis[11];
     strcpy(permis, "");
 
-    if (st.st_mode & S_IRUSR)
+    if(st.st_mode & S_IRUSR)
     {
         strcat(permis, "r");
     }
@@ -67,7 +67,7 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
-    if (st.st_mode & S_IWUSR)
+    if(st.st_mode & S_IWUSR)
     {
         strcat(permis, "w");
     }
@@ -75,7 +75,7 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
-    if (st.st_mode & S_IXUSR)
+    if(st.st_mode & S_IXUSR)
     {
         strcat(permis, "x");
     }
@@ -83,7 +83,7 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
-    if (st.st_mode & S_IRGRP)
+    if(st.st_mode & S_IRGRP)
     {
         strcat(permis, "r");
     }
@@ -91,7 +91,7 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
-    if (st.st_mode & S_IWGRP)
+    if(st.st_mode & S_IWGRP)
     {
         strcat(permis, "w");
     }
@@ -99,7 +99,7 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
-    if (st.st_mode & S_IXGRP)
+    if(st.st_mode & S_IXGRP)
     {
         strcat(permis, "x");
     }
@@ -107,7 +107,7 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
-    if (st.st_mode & S_IROTH)
+    if(st.st_mode & S_IROTH)
     {
         strcat(permis, "r");
     }
@@ -115,7 +115,7 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
-    if (st.st_mode & S_IWOTH)
+    if(st.st_mode & S_IWOTH)
     {
         strcat(permis, "w");
     }
@@ -123,7 +123,7 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
-    if (st.st_mode & S_IXOTH)
+    if(st.st_mode & S_IXOTH)
     {
         strcat(permis, "x");
     }
@@ -135,13 +135,28 @@ const char *prelucrare_permisiuni(struct stat st)
     return strdup(permis);
 }
 
-void parcurgere_recursiva(const char *director, int snapi)
+const char *indentare(int nivel_indentare)
+{
+    static char indentare[1000];
+    strcpy(indentare, ""); 
+
+    int i;
+
+    for(i = 0; i < nivel_indentare; i++)
+    {
+        strcat(indentare, "\t");
+    }
+
+    return indentare;
+}
+
+void parcurgere_recursiva(const char *director, int snapi, int nivel_indentare)
 {
     DIR *subdir = opendir(director);
 
     char cale[PATH_MAX];
 
-    if (subdir == NULL)
+    if(subdir == NULL)
     {
         eroare("Directorul pe care il voiam curent nu a putut fi deschis.");
     }
@@ -150,9 +165,9 @@ void parcurgere_recursiva(const char *director, int snapi)
 
     struct dirent *dst;
 
-    while ((dst = readdir(subdir)) != NULL)
+    while((dst = readdir(subdir)) != NULL)
     {
-        if (strcmp(dst->d_name, ".") == 0 || strcmp(dst->d_name, "..") == 0)
+        if(strcmp(dst->d_name, ".") == 0 || strcmp(dst->d_name, "..") == 0)
         {
             continue;
         }
@@ -162,12 +177,12 @@ void parcurgere_recursiva(const char *director, int snapi)
 
         struct stat st;
 
-        if (lstat(cale, &st) == -1)
+        if(lstat(cale, &st) == -1)
         {
             eroare("Eroare la determinarea informatiilor despre entitatea curenta, ceva s-a intamplat cu lstat.");
         }
 
-        if (S_ISDIR(st.st_mode) != 0)
+        if(S_ISDIR(st.st_mode) != 0)
         {
             struct director d;
             strncpy(d.nume, dst->d_name, sizeof(d.nume));
@@ -181,17 +196,18 @@ void parcurgere_recursiva(const char *director, int snapi)
             char buffer[5000];
             char *modificare_director = ctime(&d.data_modificare);
             char *accesare_director = ctime(&d.ultima_accesare);
-            snprintf(buffer, sizeof(buffer), "Director\nCale: %s\nNume: %s\nDimensiune: %ld bytes\nModificare: %sUltima accesare: %sInode: %ld\nPermisiuni: %s\n\n", d.cale, d.nume, d.dimensiune, modificare_director, accesare_director, d.inode, p);
+            const char *indent = indentare(nivel_indentare);
+            snprintf(buffer, sizeof(buffer), "%sDirector\n%sCale: %s\n%sNume: %s\n%sDimensiune: %ld bytes\n%sModificare: %s%sUltima accesare: %s%sInode: %ld\n%sPermisiuni: %s\n\n", indent, indent, d.cale, indent, d.nume, indent, d.dimensiune, indent, modificare_director, indent, accesare_director, indent, d.inode, indent, p);
 
             ssize_t written_bytes = write(snapi, buffer, strlen(buffer));
-            if (written_bytes == -1)
+            if(written_bytes == -1)
             {
                 eroare("Eroare la scrierea informatiilor despre director in snapshot.");
             }
 
-            parcurgere_recursiva(cale, snapi);
+            parcurgere_recursiva(cale, snapi, nivel_indentare + 1);
         }
-        else if (S_ISREG(st.st_mode) != 0)
+        else if(S_ISREG(st.st_mode) != 0)
         {
             struct fisier fis;
             strncpy(fis.nume, dst->d_name, sizeof(fis.nume));
@@ -205,15 +221,16 @@ void parcurgere_recursiva(const char *director, int snapi)
             char buffer[5000];
             char *modificare_fisier = ctime(&fis.data_modificare);
             char *accesare_fisier = ctime(&fis.ultima_accesare);
-            snprintf(buffer, sizeof(buffer), "Fisier\nCale: %s\nNume: %s\nDimensiune: %ld bytes\nModificare: %sUltima accesare: %sInode: %ld\nPermisiuni: %s\n\n", fis.cale, fis.nume, fis.dimensiune, modificare_fisier, accesare_fisier, fis.inode, p_fis);
+            const char *indent_fis = indentare(nivel_indentare);
+            snprintf(buffer, sizeof(buffer), "%sFisier\n%sCale: %s\n%sNume: %s\n%sDimensiune: %ld bytes\n%sModificare: %s%sUltima accesare: %s%sInode: %ld\n%sPermisiuni: %s\n\n", indent_fis, indent_fis, fis.cale, indent_fis, fis.nume, indent_fis, fis.dimensiune, indent_fis, modificare_fisier, indent_fis, accesare_fisier, indent_fis, fis.inode, indent_fis, p_fis);
 
             ssize_t written_bytes = write(snapi, buffer, strlen(buffer));
-            if (written_bytes == -1)
+            if(written_bytes == -1)
             {
                 eroare("Eroare la scrierea informatiilor despre fisier in snapshot.");
             }
         }
-        else if (S_ISLNK(st.st_mode) != 0)
+        else if(S_ISLNK(st.st_mode) != 0)
         {
             struct legatura_simbolica leg;
             strncpy(leg.nume, dst->d_name, sizeof(leg.nume));
@@ -227,17 +244,18 @@ void parcurgere_recursiva(const char *director, int snapi)
             char buffer[5000];
             char *modificare_legatura = ctime(&leg.data_modificare);
             char *accesare_legatura = ctime(&leg.ultima_accesare);
-            snprintf(buffer, sizeof(buffer), "Legatura simbolica\nCale: %s\nNume: %s\nDimensiune: %ld bytes\nModificare: %sUltima accesare: %sInode: %ld\nPermisiuni: %s\n\n", leg.cale, leg.nume, leg.dimensiune, modificare_legatura, accesare_legatura, leg.inode, p_leg);
+            const char *indent_leg = indentare(nivel_indentare);
+            snprintf(buffer, sizeof(buffer), "%sLegatura simbolica\n%sCale: %s\n%sNume: %s\n%sDimensiune: %ld bytes\n%sModificare: %s%sUltima accesare: %s%sInode: %ld\n%sPermisiuni: %s\n\n", indent_leg, indent_leg, leg.cale, indent_leg, leg.nume, indent_leg, leg.dimensiune, indent_leg, modificare_legatura, indent_leg, accesare_legatura, indent_leg, leg.inode, indent_leg, p_leg);
 
             ssize_t written_bytes = write(snapi, buffer, strlen(buffer));
-            if (written_bytes == -1)
+            if(written_bytes == -1)
             {
                 eroare("Eroare la scrierea informatiilor despre legatura simbolica in fisierul snapshot.");
             }
         }
     }
 
-    if (closedir(subdir) == -1)
+    if(closedir(subdir) == -1)
     {
         eroare("Eroare la inchiderea directorului.");
     }
@@ -247,14 +265,14 @@ int compara_snapi(const char *snapshot_vechi, const char *snapshot_nou)
 {
     int snap_vechi = open(snapshot_vechi, O_RDONLY, S_IRUSR | S_IROTH | S_IRGRP);
 
-    if (snap_vechi == -1)
+    if(snap_vechi == -1)
     {
         eroare("Fisierul vechi de snapshot nu a putut fi deschis.");
     }
 
     int snap_nou = open(snapshot_nou, O_RDONLY, S_IRUSR | S_IROTH | S_IRGRP);
 
-    if (snap_nou == -1)
+    if(snap_nou == -1)
     {
         eroare("Fisierul nou de snapshot nu a putut fi deschis.");
     }
@@ -263,11 +281,11 @@ int compara_snapi(const char *snapshot_vechi, const char *snapshot_nou)
     char linie_noua[5000];
     ssize_t bytes_cititi_vechi, bytes_cititi_nou;
 
-    while ((bytes_cititi_vechi = read(snap_vechi, linie_veche, sizeof(linie_veche))) > 0 && (bytes_cititi_nou = read(snap_nou, linie_noua, sizeof(linie_noua))) > 0)
+    while((bytes_cititi_vechi = read(snap_vechi, linie_veche, sizeof(linie_veche))) > 0 && (bytes_cititi_nou = read(snap_nou, linie_noua, sizeof(linie_noua))) > 0)
     {
-        if (bytes_cititi_vechi != bytes_cititi_nou || memcmp(linie_veche, linie_noua, bytes_cititi_vechi) != 0)
+        if(bytes_cititi_vechi != bytes_cititi_nou || memcmp(linie_veche, linie_noua, bytes_cititi_vechi) != 0)
         {
-            if ((close(snap_nou) == -1) || (close(snap_vechi) == -1))
+            if((close(snap_nou) == -1) || (close(snap_vechi) == -1))
             {
                 eroare("Eroare la inchiderea snapshot-urilor.");
             }
@@ -275,17 +293,17 @@ int compara_snapi(const char *snapshot_vechi, const char *snapshot_nou)
         }
     }
 
-    if (bytes_cititi_vechi == -1 || bytes_cititi_nou == -1)
+    if(bytes_cititi_vechi == -1 || bytes_cititi_nou == -1)
     {
         eroare("Eroare la citirea din fisierele de snapshot.");
     }
 
-    if (close(snap_vechi) == -1)
+    if(close(snap_vechi) == -1)
     {
         eroare("Eroare la inchiderea snapshot-ului vechi.");
     }
 
-    if (close(snap_nou) == -1)
+    if(close(snap_nou) == -1)
     {
         eroare("Eroare la inchiderea snapshot-ului nou.");
     }
@@ -297,12 +315,12 @@ int main(int argc, char *argv[])
 {
     fisier_com = fopen("flow_executie.txt", "w");
 
-    if (fisier_com == NULL)
+    if(fisier_com == NULL)
     {
         printf("Eroare la deschiderea fisierului care urmareste flow-ul executiei.\n");
     }
 
-    if ((argc < 5) || (argc > 15))
+    if((argc < 5) || (argc > 15))
     {
         eroare("Numarul de argumente difera de cel asteptat.");
     }
@@ -312,11 +330,11 @@ int main(int argc, char *argv[])
     int index_output = -1;
     int index_izolare = -1;
 
-    for (i = 1; i < argc; i++)
+    for(i = 1; i < argc; i++)
     {
-        for (j = 1; j < i; j++)
+        for(j = 1; j < i; j++)
         {
-            if (strcmp(argv[i], argv[j]) == 0)
+            if(strcmp(argv[i], argv[j]) == 0)
             {
                 eroare("Unele argumente se repeta.");
             }
@@ -395,9 +413,9 @@ int main(int argc, char *argv[])
         invalid(fisier_com, "Nu a fost dat ca argument un director pentru izolare, este dat un fisier sau o legatura simbolica.");
     }
 
-    for (i = 1; i < argc; i++)
+    for(i = 1; i < argc; i++)
     {
-        if ((i == index_output) || (i == index_output - 1) || (i == index_izolare) || (i == index_izolare - 1))
+        if((i == index_output) || (i == index_output - 1) || (i == index_izolare) || (i == index_izolare - 1))
         {
             continue;
         }
@@ -408,12 +426,12 @@ int main(int argc, char *argv[])
 
         fprintf(fisier_com, "Directorul introdus: %s\n", director);
 
-        if (lstat(director, &st) == -1)
+        if(lstat(director, &st) == -1)
         {
             eroare("Eroare la determinarea informatiilor despre director, ceva s-a intamplat cu lstat.");
         }
 
-        if (S_ISDIR(st.st_mode) == 0)
+        if(S_ISDIR(st.st_mode) == 0)
         {
             fprintf(fisier_com, "Argumentul cu numarul %d nu este un director, deci nu va fi procesat.\n", i);
             continue;
@@ -429,11 +447,11 @@ int main(int argc, char *argv[])
 
         int snap = open(nume_snapshot, O_RDONLY);
 
-        if (snap < 0)
+        if(snap < 0)
         {
             snap = open(nume_snapshot, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP);
 
-            if (snap == -1)
+            if(snap == -1)
             {
                 eroare("Fisierul nu a putut fi deschis/creat.");
             }
@@ -444,7 +462,7 @@ int main(int argc, char *argv[])
         {
             snap = open(nume_snapshot_temporar, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP);
 
-            if (snap == -1)
+            if(snap == -1)
             {
                 eroare("Fisierul nu a putut fi deschis/creat.");
             }
@@ -469,7 +487,7 @@ int main(int argc, char *argv[])
             eroare("Eroare la scrierea informatiilor despre director in snapshot.");
         }
 
-        parcurgere_recursiva(director, snap);
+        parcurgere_recursiva(director, snap, 1);
 
         if(close(snap) == -1)
         {
@@ -501,7 +519,7 @@ int main(int argc, char *argv[])
             }
             else
             {
-                if (unlink(nume_snapshot_temporar) == -1)
+                if(unlink(nume_snapshot_temporar) == -1)
                 {
                     eroare("Nu s-a putut sterge snapshot-ul temporar.");
                 }
