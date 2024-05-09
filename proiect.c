@@ -9,6 +9,7 @@
 #include <libgen.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/wait.h>
 
 FILE *fisier_com; // un fisier obisnuit care va retine doar comentariile despre flow-ul executiei, nu are nicio influenta asupra programului
 
