@@ -139,6 +139,23 @@ const char *prelucrare_permisiuni(struct stat st)
     return strdup(permis);
 }
 
+int lipsa_permisiuni(const char *permis)
+{
+    int lipsa = 1;
+
+    if(permis == NULL) 
+    {
+        eroare("S-a incercat verificarea unui String NULL.");
+    }
+
+    if(strcmp(permis, "--- --- ---") != 0)
+    {
+        lipsa = 0;
+    }
+
+    return lipsa;
+}
+
 const char *indentare(int nivel_indentare)
 {
     static char indentare[1000];
@@ -570,7 +587,6 @@ int main(int argc, char *argv[])
 
         if(WIFEXITED(status)) 
         {
-            fprintf(fisier_com, "exited, status=%d\n", WEXITSTATUS(status));
             printf("Child process %d terminated with PID %d\n", process_number++, w);
         } 
 
