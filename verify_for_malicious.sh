@@ -98,7 +98,7 @@ caractere_mediu=121
 
 #verificam daca parametrii din fisierul nostru depasesc dimensiunile exagerate
 
-if test $linii_fisier -lt $linii_mediu && $cuvinte_fisier -gt $cuvinte_mediu && $caractere_fisier -lt $caractere_mediu
+if [ $linii_fisier -lt $linii_mediu ] && [ $cuvinte_fisier -gt $cuvinte_mediu ] && [ $caractere_fisier -lt $caractere_mediu ];
 then
     echo -n "$1" #trimite numele fisierului inapoi ca sa stim cine e malitios, -n se asigura ca nu va mai fi \n adaugat la final -> faciliteaza compararea 
     chmod u=r,g=r,o=r "$1" 
