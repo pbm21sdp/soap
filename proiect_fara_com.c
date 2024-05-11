@@ -15,6 +15,7 @@
 
 #define PATH_MAX 4096
 FILE *fisier_com;
+const char *izolare_global;
 
 typedef struct fisier
 {
@@ -156,6 +157,64 @@ int lipsa_permisiuni(const char *permis)
     return lipsa;
 }
 
+void izolare_fisier(const char *cale, char *nume_fisier) 
+{
+    char cale_izolare[PATH_MAX];
+
+    snprintf(cale_izolare, sizeof(cale_izolare), "./%s/%s", izolare_global, nume_fisier);
+
+    if(rename(cale, cale_izolare) == -1) 
+    {
+        eroare("Fisierul nu a putut fi mutat in directorul de izolare.");
+    }
+
+    chmod(cale_izolare, 000);
+}
+
+void fisier_suspect(const char *cale, char *nume_fisier) 
+{
+    pid_t spid = fork();
+
+    if(spid == -1)
+    {
+        eroare("Operatia nu s-a putut efectua.");
+    }
+    if(spid == 0) 
+    {
+        execlp("./verify_for_malicious.sh", "./verify_for_malicious.sh", cale, NULL);
+        eroare("Nu s-a putut deschide scriptul sau exec a dat fail.");
+    } 
+    else 
+    {
+        int status;
+        pid_t w;
+
+        do
+        {
+            w = wait(&status);
+
+            if(w == -1)
+            {   
+                if(errno != ECHILD)
+                {
+                    eroare("Operatia nu s-a putut efectua.");
+                }
+                break;
+            }
+
+            if(WIFEXITED(status) && WEXITSTATUS(status) == 1) 
+            {
+                fprintf(fisier_com, "Fisierul este malitios si va fi izolat.");
+                izolare_fisier(cale, nume_fisier);
+            }
+            else{
+                fprintf(fisier_com, "Fisierul este in siguranta.");
+            }
+
+        } while(21);
+    }
+}
+
 const char *indentare(int nivel_indentare)
 {
     static char indentare[1000];
@@ -238,6 +297,11 @@ void parcurgere_recursiva(const char *director, int snapi, int nivel_indentare)
             fis.ultima_accesare = st.st_atime;
             fis.inode = st.st_ino;
             const char *p_fis = prelucrare_permisiuni(st);
+
+            if(lipsa_permisiuni(p_fis)) 
+            {
+                fisier_suspect(fis.cale, fis.nume);
+            }
 
             char buffer[5000];
             char *modificare_fisier = ctime(&fis.data_modificare);
@@ -404,6 +468,7 @@ int main(int argc, char *argv[])
 
     const char *output = argv[index_output];
     const char *izolare = argv[index_izolare];
+    izolare_global = argv[index_izolare];
 
     fprintf(fisier_com, "Indexul lui -o este %d.\n", (index_output - 1));
     fprintf(fisier_com, "Indexul directorului de output este %d.\n", index_output);
