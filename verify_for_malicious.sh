@@ -73,11 +73,11 @@ fi
 
 #VERIFICARE 4.2 - foarte putine linii, foarte multe caractere si cuvinte
 
-#presupunem ca ar fi suspect ca un fisier sa aiba sub 5 linii si peste 2021 cuvinte si 4021 caractere
+#presupunem ca ar fi suspect ca un fisier sa aiba sub 3 linii si peste 1000 cuvinte si 2000 caractere
 
-linii_min=5
-cuvinte_min=2021
-caractere_min=4021
+linii_min=2
+cuvinte_min=1000
+caractere_min=2000
 
 #verificam daca parametrii din fisierul nostru depasesc dimensiunile exagerate
 
