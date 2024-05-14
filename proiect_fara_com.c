@@ -88,6 +88,9 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
+
+    strcat(permis, " ");
+
     if(st.st_mode & S_IRGRP)
     {
         strcat(permis, "r");
@@ -112,6 +115,9 @@ const char *prelucrare_permisiuni(struct stat st)
     {
         strcat(permis, "-");
     }
+
+    strcat(permis, " ");
+
     if(st.st_mode & S_IROTH)
     {
         strcat(permis, "r");
@@ -163,7 +169,7 @@ void izolare_fisier(const char *cale, char *nume_fisier)
 
     snprintf(cale_izolare, sizeof(cale_izolare), "./%s/%s", izolare_global, nume_fisier);
 
-    if(rename(cale, cale_izolare) == -1) 
+    if (rename(cale, cale_izolare) == -1) 
     {
         eroare("Fisierul nu a putut fi mutat in directorul de izolare.");
     }
@@ -171,16 +177,32 @@ void izolare_fisier(const char *cale, char *nume_fisier)
     chmod(cale_izolare, 000);
 }
 
-void fisier_suspect(const char *cale, char *nume_fisier) 
+void fisier_suspect(const char *cale, char *nume_fisier, int *nr_fisiere_malitioase) 
 {
+    int pfd[2];
+    if (pipe(pfd) == -1) 
+    {
+        eroare("Nu s-a putut crea pipe-ul");
+    }
+
     pid_t spid = fork();
 
     if(spid == -1)
     {
-        eroare("Operatia nu s-a putut efectua.");
+        eroare("Operatia nu s-a putut efectua 1.");
     }
-    if(spid == 0) 
+    if (spid == 0) 
     {
+        close(pfd[0]); 
+        int d = dup2(pfd[1], STDOUT_FILENO); 
+
+        if(d == -1)
+        {
+            eroare("Dup2 a esuat.");
+        }
+
+        close(pfd[1]);
+        close(pfd[0]);
         execlp("./verify_for_malicious.sh", "./verify_for_malicious.sh", cale, NULL);
         eroare("Nu s-a putut deschide scriptul sau exec a dat fail.");
     } 
@@ -188,6 +210,8 @@ void fisier_suspect(const char *cale, char *nume_fisier)
     {
         int status;
         pid_t w;
+
+        close(pfd[1]);
 
         do
         {
@@ -197,18 +221,33 @@ void fisier_suspect(const char *cale, char *nume_fisier)
             {   
                 if(errno != ECHILD)
                 {
-                    eroare("Operatia nu s-a putut efectua.");
+                    eroare("Operatia nu s-a putut efectua 2.");
                 }
                 break;
             }
 
-            if(WIFEXITED(status) && WEXITSTATUS(status) == 1) 
+            if (WIFEXITED(status) == 1) 
             {
-                fprintf(fisier_com, "Fisierul este malitios si va fi izolat.");
-                izolare_fisier(cale, nume_fisier);
+                fprintf(fisier_com, " ");
+                char buffer[1024];
+                read(pfd[0], buffer, sizeof(buffer));
+
+                if(strstr(buffer, "safe"))
+                {
+                    buffer[4] = 0;
+                }
+
+                if (strstr(buffer, "safe") == NULL) 
+                {
+                    (*nr_fisiere_malitioase)++;
+                    izolare_fisier(cale, nume_fisier);
+                }
+
+                close(pfd[0]);
+                wait(NULL); 
             }
             else{
-                fprintf(fisier_com, "Fisierul este in siguranta.");
+                fprintf(fisier_com, " ");
             }
 
         } while(21);
@@ -230,7 +269,7 @@ const char *indentare(int nivel_indentare)
     return indentare;
 }
 
-void parcurgere_recursiva(const char *director, int snapi, int nivel_indentare)
+void parcurgere_recursiva(const char *director, int snapi, int nivel_indentare, int *nr_fisiere_malitioase)
 {
     DIR *subdir = opendir(director);
 
@@ -285,7 +324,7 @@ void parcurgere_recursiva(const char *director, int snapi, int nivel_indentare)
                 eroare("Eroare la scrierea informatiilor despre director in snapshot.");
             }
 
-            parcurgere_recursiva(cale, snapi, nivel_indentare + 1);
+            parcurgere_recursiva(cale, snapi, nivel_indentare + 1, nr_fisiere_malitioase);
         }
         else if(S_ISREG(st.st_mode) != 0)
         {
@@ -300,7 +339,7 @@ void parcurgere_recursiva(const char *director, int snapi, int nivel_indentare)
 
             if(lipsa_permisiuni(p_fis)) 
             {
-                fisier_suspect(fis.cale, fis.nume);
+                fisier_suspect(fis.cale, fis.nume, nr_fisiere_malitioase);
             }
 
             char buffer[5000];
@@ -426,7 +465,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    fprintf(fisier_com, "Nu există argumente repetitive.\n");
+    fprintf(fisier_com, "Nu exista argumente repetitive.\n");
 
     for(i = 1; i < argc; i++)
     {
@@ -519,6 +558,8 @@ int main(int argc, char *argv[])
         {
             fprintf(fisier_com, "PID-ul copilului este %d\n", (int)(getpid()));
 
+            int nr_fisiere_malitioase = 0;
+
             const char *director = argv[i];
             struct stat st;
             struct director dir;
@@ -586,7 +627,7 @@ int main(int argc, char *argv[])
                 eroare("Eroare la scrierea informatiilor despre director in snapshot.");
             }
 
-            parcurgere_recursiva(director, snap, 1);
+            parcurgere_recursiva(director, snap, 1, &nr_fisiere_malitioase);
 
             if(close(snap) == -1)
             {
@@ -631,7 +672,7 @@ int main(int argc, char *argv[])
                 fprintf(fisier_com, "Snapshot-ul temporar nu exista, deoarece e prima rulare.\n");
             }
 
-            exit(0);
+            exit(nr_fisiere_malitioase);
         }
     }
 
@@ -652,7 +693,8 @@ int main(int argc, char *argv[])
 
         if(WIFEXITED(status)) 
         {
-            printf("Child process %d terminated with PID %d\n", process_number++, w);
+            fprintf(fisier_com, "S-au detectat %d fisiere malitioase.\n", WEXITSTATUS(status));
+            fprintf(fisier_com, "Child process %d terminated with PID %d\n", process_number++, w);
         } 
 
     } while(21);
