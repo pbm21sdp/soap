@@ -1,17 +1,21 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <libgen.h>
-#include <errno.h>
-#include <time.h>
-#include <sys/wait.h>
+#include <stdio.h> // biblioteca standard pentru operatii de input/output
+#include <stdlib.h> // biblioteca standard pentru functii de alocare a memoriei, controlul procesului
+#include <stdint.h> // biblioteca pentru tipuri de date intregi de dimensiune specifica
+#include <string.h> // biblioteca pentru manipularea sirurilor de caractere
+#include <dirent.h> // biblioteca pentru manipularea directoarelor
+#include <limits.h> // biblioteca pentru valorile limita ale tipurilor de date
+#include <fcntl.h> // biblioteca pentru controlul fisierelor
+#include <unistd.h> // biblioteca pentru apeluri de sistem POSIX (ex. fork, pipe)
+#include <libgen.h> // biblioteca pentru manipularea numelor de cale
+#include <errno.h> // biblioteca pentru definirea erorilor si mesajelor de eroare
+#include <time.h> // biblioteca pentru manipularea timpului si datei
+#include <sys/stat.h> // biblioteca pentru lucrul cu atributele fisierelor
+#include <sys/wait.h> // biblioteca pentru asteptarea terminarii proceselor copil
+#include <sys/sysmacros.h> // biblioteca pentru accesul la macro-urile de sistem
 
+#define PATH_MAX 4096 // macro care specifica dimensiunea maxima a unei cai de fisier/director ca 4096 caractere
 FILE *fisier_com; // un fisier obisnuit care va retine doar comentariile despre flow-ul executiei, nu are nicio influenta asupra programului
+const char *izolare_global; // pointer global de tip char care va retine denumirea directorului de izolare 
 
 // structura care va retine informatiile despre un regular file
 typedef struct fisier
@@ -60,7 +64,7 @@ void invalid(FILE *fisier, const char *mesaj) // functie care primeste ca parame
 
 const char *prelucrare_permisiuni(struct stat st) // functie care creeaza un nou String care retine permisiunile entitatii, primeste ca parametru o structura stat
 {
-    static char permis[11]; // string permis de 11 caractere declarat static pentru a ramane in memorie cat am nevoie de el, chiar si dupa ce ies din functie
+    static char permis[20]; // string permis de maxim 20 caractere declarat static pentru a ramane in memorie cat am nevoie de el, chiar si dupa ce ies din functie
     strcpy(permis, "");     // se initializeaza string-ul la fiecare iteratie cu string-ul gol, practic "resetez" string-ul ca sa retina permisiunile pentru fiecare entitate
 
     if(st.st_mode & S_IRUSR) // verifica daca user are drept de read
@@ -87,6 +91,9 @@ const char *prelucrare_permisiuni(struct stat st) // functie care creeaza un nou
     {
         strcat(permis, "-"); // daca nu are drept de execute, concateneaza la string-ul "permis" caracterul "-", pe a treia pozitie
     }
+
+    strcat(permis, " "); // adauga un spatiu pentru a separa user de restul permisiunilor
+
     if(st.st_mode & S_IRGRP) // verifica daca grup are drept de read
     {
         strcat(permis, "r"); // daca are, concateneaza la string-ul "permis" litera r, pe a patra pozitie
@@ -111,6 +118,9 @@ const char *prelucrare_permisiuni(struct stat st) // functie care creeaza un nou
     {
         strcat(permis, "-"); // daca nu are drept de execute, concateneaza la string-ul "permis" caracterul "-", pe a sasea pozitie
     }
+
+    strcat(permis, " "); // adauga un spatiu pentru a separa group de restul permisiunilor
+
     if(st.st_mode & S_IROTH) // verifica daca other are drept de read
     {
         strcat(permis, "r"); // daca are, concateneaza la string-ul "permis" litera r, pe a saptea pozitie
@@ -137,6 +147,116 @@ const char *prelucrare_permisiuni(struct stat st) // functie care creeaza un nou
     }
 
     return strdup(permis); // returneaza o copie a string-ului
+}
+
+int lipsa_permisiuni(const char *permis) // functie care returneaza un intreg 1 - daca lipsesc toate permisiunile, 0 - daca exista anumite permisiuni, primeste ca parametru un const char *permis, care va fi return-ul functiei prelucrare_permisiuni
+{
+    int lipsa = 1; // variabila flag de tip intreg initializata cu 1
+
+    if(permis == NULL) // never trust user input 
+    {
+        eroare("S-a incercat verificarea unui String NULL."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
+    if(strcmp(permis, "--- --- ---") != 0) // verificam daca fisierul testat are vreo permisiune 
+    {
+        lipsa = 0; // are, deci trecem flag-ul pe 0
+    }
+
+    // daca lipsa a ramas 1 inseamna ca fisierul nu are permisiuni
+
+    return lipsa; // valoarea de return a functiei este acest flag
+}
+
+void izolare_fisier(const char *cale, char *nume_fisier) // functie de tip void pentru ca va izola fisierul malitios mutandu-l in alt director prin schimbarea caii, primeste ca parametrii 2 pointeri la caracter, calea originala a fisierului si doar numele sau, pentru a facilita concatenarea 
+{
+    char cale_izolare[PATH_MAX]; // definim un string care va fi calea fisierului odata mutat in directorul de izolare 
+
+    snprintf(cale_izolare, sizeof(cale_izolare), "./%s/%s", izolare_global, nume_fisier); // construim cu snprintf calea folosindu-ne de pointerul global la caracter care retine numele directorului de izolare si numele fisierului, cu / pentru a simula o calea legit 
+
+    if (rename(cale, cale_izolare) == -1) // redenumim practic calea fisierului in calea cu izolare pentru a forta fisierului sa se mute in izolare 
+    {
+        eroare("Fisierul nu a putut fi mutat in directorul de izolare."); // daca rename a esuat inseamna ca nu s-a mutat fisierul
+    }
+
+    chmod(cale_izolare, 000); // setam permisiunile fisierului din izolare inapoi pe 0, pentru ca daca l am mutat inseamna ca le avea de dinainte 0, noi i am dat drept de read cat sa l manipulam (din script)
+}
+
+void fisier_suspect(const char *cale, char *nume_fisier, int *nr_fisiere_malitioase) // functie care primeste ca parametrii calea si numele unui fisier si o variabila care va retine cate fisiere sunt malitioase 
+{
+    int pfd[2]; // declara un array cu descriptorii de fisier care refera cele doua capete ale acestuia 
+    if (pipe(pfd) == -1) // se creeaza un pipe 
+    {
+        eroare("Nu s-a putut crea pipe-ul"); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+
+    pid_t spid = fork(); // se apeleaza fork pentru a crea un proces copil
+
+    if(spid == -1) // nu s-a putut crea procesul copil
+    {
+        eroare("Operatia nu s-a putut efectua 1."); // apelam functia eroare si precizam ce mai exact nu a mers
+    }
+    if (spid == 0) // ne aflam in codul fiului
+    {
+        close(pfd[0]); // inchide capatul de citire al pipe-ului, deci procesul copil va scrie in pipe
+        int d = dup2(pfd[1], STDOUT_FILENO); // redirecteaza capatul de scriere spre stdout 
+
+        if(d == -1) // verificam daca a esuat dup2 
+        {
+            eroare("Dup2 a esuat."); // apelam functia eroare si precizam ce mai exact nu a mers
+        }
+
+        close(pfd[1]); // inchide capatul de scriere al pipe-ului
+        close(pfd[0]); // inchid din nou capatul de citire sa fiu sigura ca s-a inchis si ca nu o sa mi blochez procesele
+        execlp("./verify_for_malicious.sh", "./verify_for_malicious.sh", cale, NULL); // folosim exec pentru a obtine un proces care sa ruleze un program diferit de cel al parintelui, mai exact sa ruleze script-ul 
+        eroare("Nu s-a putut deschide scriptul sau exec a dat fail."); // apelam functia eroare si precizam ce mai exact nu a mers
+    } 
+    else 
+    {
+        int status; // variabila care va stoca starea procesului copil
+        pid_t w; // variabila care va retine pidul copilului 
+
+        close(pfd[1]); // inchide capatul de scriere al pipe-ului in parinte 
+
+        do
+        {
+            w = wait(&status); // asteapta cu wait sa se termine procesul copil si ii preia starea 
+
+            if(w == -1) // verifica daca a esuat asteptarea 
+            {   
+                if(errno != ECHILD) // verifica daca eroarea generata nu este din cauza absentei 
+                {
+                    eroare("Operatia nu s-a putut efectua 2."); // apelam functia eroare si precizam ce mai exact nu a mers
+                }
+                break; // intrerupe bucla do-while daca nu sunt procese copil dupa care sa asteptam 
+            }
+
+            if (WIFEXITED(status) == 1) // daca s-a terminat cu succes procesul copil
+            {
+                fprintf(fisier_com, " "); // linie pe care am uitat sa o sterg care scrie in fisier 
+                char buffer[1024]; // declaram un buffer cu 1024, dublu fata de pipe cu 512 
+                read(pfd[0], buffer, sizeof(buffer)); // citeste datele din pipe in buffer 
+
+                if(strstr(buffer, "safe")) //verifica daca se regaseste in buffer cuvantul safe, insemnand ca fisierul nu e malitios 
+                {
+                    buffer[4] = 0; // daca e safe termina sirul dupa safe ca sa nu mai citeasca inutil
+                }
+
+                if (strstr(buffer, "safe") == NULL) // daca fisierul este malitios inseamna ca procesul a returnat numele fisierului nu safe 
+                {
+                    (*nr_fisiere_malitioase)++; // incrementam numarul de fisiere malitioase pentru acest proces 
+                    izolare_fisier(cale, nume_fisier); // apelam functia de izolare pentru a muta fisierul malitios 
+                }
+
+                close(pfd[0]); // inchidem capatul de citire al pipe-ului
+                wait(NULL); // asteptam sa se termine procesele copil fara sa stocam starea cuiva
+            }
+            else{
+                fprintf(fisier_com, " "); // comentariu random
+            }
+
+        } while(21); // continua bucla pana se termina toate procesele copil
+    }
 }
 
 const char *indentare(int nivel_indentare) // functie care returneaza un String care va reprezenta nivelul indentarii pentru a crea o ierarhie, care primeste ca parametru un intreg reprezentand nivelul indentarii pe care ne aflam
@@ -236,6 +356,11 @@ void parcurgere_recursiva(const char *director, int snapi, int nivel_indentare) 
             fis.ultima_accesare = st.st_atime;                // atribuie campului ultima_accesare din struct fisier timestamp-ul preluat din st.st_atime
             fis.inode = st.st_ino;                            // atribuie campului inode din struct fisier valoarea preluata din st.st_ino
             const char *p_fis = prelucrare_permisiuni(st);    // atribuie unui pointer p_fis de tip char valoarea returnata de functia prelucrare_permisiuni, dand ca parametru struct stat-ul definit mai sus
+
+            if(lipsa_permisiuni(p_fis)) 
+            {
+                fisier_suspect(fis.cale, fis.nume, nr_fisiere_malitioase);
+            }
 
             char buffer[5000]; // buffer care va retine informatia formatata
             char *modificare_fisier = ctime(&fis.data_modificare); // atribuie unui pointer modificare_fisier de tip char timestamp-ul obtinut prin prelucrarea cu ctime a valorii din campul data_modificare
@@ -345,7 +470,7 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
 
     // se asteapta 10 nume de directoare date ca argumente, deci argc trebuie sa fie minim 3 (pentru ./prog, -o si output) si maxim 13 
 
-    if((argc < 3) || (argc > 13)) // verificam daca argc este diferit mai mic decat 3 sau mai mare decat 13 si depaseste limitele impuse de noi
+    if((argc < 5) || (argc > 15)) // verificam daca argc este diferit mai mic decat 3 sau mai mare decat 13 si depaseste limitele impuse de noi
     {
         // acesta este un caz de eroare, deci putem apela functia creata eroare anterior cu un mesaj care sa ne anunte ca am introdus un nr diferit de argumente
         eroare("Numarul de argumente difera de cel asteptat."); // apelam functia invalid si precizam ce mai exact nu a potrivit
@@ -367,7 +492,7 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
         }
     }
 
-    fprintf(fisier_com, "Nu există argumente repetitive.\n"); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+    fprintf(fisier_com, "Nu exista argumente repetitive.\n"); // mesaj afisat in fisier pentru a urmari flow-ul executiei
 
     for(i = 1; i < argc; i++) // iteram prin argumente pentru a gasi "-o"
     {
@@ -439,6 +564,9 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
         invalid(fisier_com, "Nu a fost dat ca argument un director pentru izolare, este dat un fisier sau o legatura simbolica."); // faptul ca nu am primit ca arg un director nu e o eroare, doar nu face ce vreau eu -> doar invalid, nu eroare
     }
 
+    int status; // variabila care va stoca starea proceselor copil
+    pid_t cpid, w; // variabile pentru pdiurile proceselor copil si pentru a astepta si a prelua statusul
+
     for(i = 1; i < argc; i++) // iteram prin argumente
     {
         if((i == index_output) || (i == index_output - 1) || (i == index_izolare) || (i == index_izolare - 1)) // daca ne aflam pe pozitia lui "-o", "-s", a directorului de izolare sau a directorului de output dam skip, pentru ca nu vrem sa afisam informatii despre acestea
@@ -446,140 +574,178 @@ int main(int argc, char *argv[]) // arguments count(argc) specifica nr argumente
             continue; // trecem la urmatoarea iteratie
         }
 
-        const char *director = argv[i]; // pointer in care se stocheaza numele directorului argument curent
-        struct stat st; // structura care contine metadata
-        struct director dir; // structura care va retine informatiile despre directorul argument
+        cpid = fork(); // creeaza un proces copil
 
-        fprintf(fisier_com, "Directorul introdus: %s\n", director); // mesaj afisat in fisier pentru a urmari flow-ul executiei
-
-        // apelul lstat returneaza 0 in caz de succes, sau -1 in caz de eroare
-        // pentru a fi folosit necesita includerea fisierului header sys/stat.header
-        // folosim apelul lstat pentru directorul primit ca parametru si pasam ca parametru 2 zona de memorie unde vrem sa pastram toate informatiile, adica st
-        // lstat este mai useful pentru ca daca este aplicata unei legaturi simbolice, informatiile returnate se vor referi la legatura, si nu la fisierul indicat
-
-        if(lstat(director, &st) == -1) // daca lstat returneaza -1 inseamna ca a aparut o eroare
+        if(cpid == -1) // verifica daca a esuat crearea procesului copil
         {
-            eroare("Eroare la determinarea informatiilor despre director, ceva s-a intamplat cu lstat."); // apelam functia eroare si precizam ce mai exact nu a mers
+            eroare("Operatia nu s-a putut efectua."); // apelam functia eroare si precizam ce mai exact nu a mers
         }
-
-        // daca nu s-a oprit din executie programul inseamna ca apelul lstat a reusit, deci am obtinut informatii despre director
-        // prin intermediul campului st_mode din st, putem verifica daca intr-adevar am primit un director ca parametru sau daca avem altceva
-        // folosim macro-ul S_ISDIR(m) ca sa verificam daca tipul fisierului primit este director
-        // in cazul nostru m este st.st_mode
-
-        if(S_ISDIR(st.st_mode) == 0) // daca valoarea returnata este 0 inseamna ca nu am primit ca argument un director
+        else if(cpid == 0) // ne aflam in procesul copil
         {
-            fprintf(fisier_com, "Argumentul cu numarul %d nu este un director, deci nu va fi procesat.\n", i); // mesaj afisat in fisier pentru a urmari flow-ul executiei
-            continue; // daca nu am primit un director ca argument dam skip, dar nu oprim executia
-        }
+            fprintf(fisier_com, "PID-ul copilului este %d\n", (int)(getpid())); // afisam in fisierul de comentarii care e procesul si cu ce pid s-a terminat 
 
-        char nume_snapshot[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor de snapshot
-        char nume_snapshot_temporar[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor temporare de snapshot
-        char nume_snapshot_vechi[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor anterioare de snapshot
+            int nr_fisiere_malitioase = 0; // initializam numarul de fisiere malitioase cu 0 
 
-        snprintf(nume_snapshot, sizeof(nume_snapshot), "%s/snapshot_%s.txt", output, director); // snprintf construieste calea fiecarui fisier de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
-        snprintf(nume_snapshot_temporar, sizeof(nume_snapshot_temporar), "%s/snapshot_%s_temp.txt", output, director); // snprintf construieste calea fiecarui fisier temporar de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
-        snprintf(nume_snapshot_vechi, sizeof(nume_snapshot_vechi), "%s/snapshot_%s_old.txt", output, director); // snprintf construieste calea fiecarui fisier anterior de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
+            const char *director = argv[i]; // pointer in care se stocheaza numele directorului argument curent
+            struct stat st; // structura care contine metadata
+            struct director dir; // structura care va retine informatiile despre directorul argument
 
-        int snap = open(nume_snapshot, O_RDONLY); // deschide fisierul curent de snapshot numai pentru citire (O_RDONLY)
+            fprintf(fisier_com, "Directorul introdus: %s\n", director); // mesaj afisat in fisier pentru a urmari flow-ul executiei
 
-        if(snap < 0) // daca open a returnat o valoare negativa inseamna ca fisierul meu curent de snapshot e inexistent, deci ori sunt la prima iteratie, ori pana acum au fost erori
-        {
-            snap = open(nume_snapshot, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP); // deschide fisierul curent de snapshot numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
-            // permisiunile pentru acest fisier snap sunt: read si write pentru user, doar read pentru group si other
-            // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
-            // in caz de succes, open returneaza un descriptor de fisier
+            // apelul lstat returneaza 0 in caz de succes, sau -1 in caz de eroare
+            // pentru a fi folosit necesita includerea fisierului header sys/stat.header
+            // folosim apelul lstat pentru directorul primit ca parametru si pasam ca parametru 2 zona de memorie unde vrem sa pastram toate informatiile, adica st
+            // lstat este mai useful pentru ca daca este aplicata unei legaturi simbolice, informatiile returnate se vor referi la legatura, si nu la fisierul indicat
 
-            if(snap == -1) // in caz de eroare returneaza -1
+            if(lstat(director, &st) == -1) // daca lstat returneaza -1 inseamna ca a aparut o eroare
             {
-                eroare("Fisierul nu a putut fi deschis/creat."); // apelam functia eroare si precizam ce mai exact nu a mers
+                eroare("Eroare la determinarea informatiilor despre director, ceva s-a intamplat cu lstat."); // apelam functia eroare si precizam ce mai exact nu a mers
             }
 
-            fprintf(fisier_com, "Fisierul de snapshot a fost creat cu succes: %s.\n", nume_snapshot); // mesaj afisat in fisier pentru a urmari flow-ul executiei
-        }
-        else // daca open a returnat o valoare nenegativa inseamna ca aveam deja un fisier de snapshot din rulari anterioare
-        {
-            snap = open(nume_snapshot_temporar, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP); // deschide fisierul temporar de snapshot numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
-            // permisiunile pentru acest fisier snap sunt: read si write pt user, doar read pt group si other
-            // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
-            // in caz de succes, open returneaza un descriptor de fisier
+            // daca nu s-a oprit din executie programul inseamna ca apelul lstat a reusit, deci am obtinut informatii despre director
+            // prin intermediul campului st_mode din st, putem verifica daca intr-adevar am primit un director ca parametru sau daca avem altceva
+            // folosim macro-ul S_ISDIR(m) ca sa verificam daca tipul fisierului primit este director
+            // in cazul nostru m este st.st_mode
 
-            if(snap == -1) // in caz de eroare returneaza -1
+            if(S_ISDIR(st.st_mode) == 0) // daca valoarea returnata este 0 inseamna ca nu am primit ca argument un director
             {
-                eroare("Fisierul nu a putut fi deschis/creat."); // apelam functia eroare si precizam ce mai exact nu a mers
+                fprintf(fisier_com, "Argumentul cu numarul %d nu este un director, deci nu va fi procesat.\n", i); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+                continue; // daca nu am primit un director ca argument dam skip, dar nu oprim executia
             }
 
-            fprintf(fisier_com, "Fisierul temporar a fost creat cu succes: %s.\n", nume_snapshot_temporar); // mesaj afisat in fisier pentru a urmari flow-ul executiei
-        }
+            char nume_snapshot[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor de snapshot
+            char nume_snapshot_temporar[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor temporare de snapshot
+            char nume_snapshot_vechi[PATH_MAX]; // sir de caractere care va stoca pe rand numele fisierelor anterioare de snapshot
 
-        // stocam informatiile directorului argument
+            snprintf(nume_snapshot, sizeof(nume_snapshot), "%s/snapshot_%s.txt", output, director); // snprintf construieste calea fiecarui fisier de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
+            snprintf(nume_snapshot_temporar, sizeof(nume_snapshot_temporar), "%s/snapshot_%s_temp.txt", output, director); // snprintf construieste calea fiecarui fisier temporar de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
+            snprintf(nume_snapshot_vechi, sizeof(nume_snapshot_vechi), "%s/snapshot_%s_old.txt", output, director); // snprintf construieste calea fiecarui fisier anterior de snapshot, indicand ca se va crea in output (output/) si cui apartine(_director.txt), pentru a le deosebi
 
-        dir.dimensiune = st.st_size;                    // atribuie campului dimensiune din struct director valoarea preluata din st.st_size
-        dir.data_modificare = st.st_mtime;              // atribuie campului data_modificare din struct director timestamp-ul preluat din st.st_mtime
-        dir.ultima_accesare = st.st_atime;              // atribuie campului ultima_accesare din struct director timestamp-ul preluat din st.st_atime
-        dir.inode = st.st_ino;                          // atribuie campului inode din struct director valoarea preluata din st.st_ino
-        const char *p_init = prelucrare_permisiuni(st); // atribuie unui pointer p_init de tip char valoarea returnata de functia prelucrare_permisiuni, dand ca parametru struct stat-ul definit mai sus
+            int snap = open(nume_snapshot, O_RDONLY); // deschide fisierul curent de snapshot numai pentru citire (O_RDONLY)
 
-        char buffer[5000]; // buffer care va retine informatia formatata
-        char *modificare_initial = ctime(&dir.data_modificare); // atribuie unui pointer modificare_initial de tip char timestamp-ul obtinut prin prelucrarea cu ctime a valorii din campul data_modificare
-        char *accesare_initial = ctime(&dir.ultima_accesare); // atribuie unui pointer accesare_initial de tip char timestamp-ul obtinut prin prelucrarea cu ctime a valorii din campul ultima_accesare
-        snprintf(buffer, sizeof(buffer), "Director initial\nNume: %s\nDimensiune: %ld bytes\nModificare: %sUltima accesare: %sInode: %ld\nPermisiuni: %s\n\n", director, dir.dimensiune, modificare_initial, accesare_initial, dir.inode, p_init); // folosesc snprintf ca sa obtin un string formatat asa cum vreau eu
-
-        ssize_t written_bytes = write(snap, buffer, strlen(buffer)); // scrie in fisier informatia formatata
-        if(written_bytes == -1) // daca am obtinut -1 inseamna ca apelul write() s-a terminat cu eroare
-        {
-            eroare("Eroare la scrierea informatiilor despre director in snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
-        }
-
-        // apelez functia mea recursiva care parcurge subarborele
-        parcurgere_recursiva(director, snap, 1);
-
-        // inchid fisierul de snapshot pentru ca am adaugat tot ce era nevoie in el
-        // functia close returneaza 0 in caz de succes, -1 in caz de eroare
-
-        if(close(snap) == -1)
-        {
-            eroare("Eroare la inchiderea snapshot-ului."); // alta self-explanatory
-        }
-
-        snap = open(nume_snapshot_temporar, O_RDONLY); // deschide fisierul temporar de snapshot numai pentru citire (O_RDONLY)
-
-        if(snap >= 0) // daca open a returnat o valoare nenegativa, inseamna ca exista un fisier temporar de snapshot, deci clar si un snapshot anterior
-        { 
-            if(close(snap) == -1) // inchid fisierul temporar de snapshot pentru ca am determinat daca exista sau nu si tin cont ca functia close returneaza 0 in caz de succes, -1 in caz de eroare
+            if(snap < 0) // daca open a returnat o valoare negativa inseamna ca fisierul meu curent de snapshot e inexistent, deci ori sunt la prima iteratie, ori pana acum au fost erori
             {
-                eroare("Eroare la inchiderea fisierului temporar."); // apelam functia eroare si precizam ce mai exact nu a mers
-            }
+                snap = open(nume_snapshot, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP); // deschide fisierul curent de snapshot numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
+                // permisiunile pentru acest fisier snap sunt: read si write pentru user, doar read pentru group si other
+                // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
+                // in caz de succes, open returneaza un descriptor de fisier
 
-            if(compara_snapi(nume_snapshot, nume_snapshot_temporar) == 1) // apelez functia de comparare a snapshot-urilor si verific daca returneaza 1, adica daca imi spune ca snapshot-urile sunt diferite
-            {
-                if(rename(nume_snapshot, nume_snapshot_vechi) != 0) // folosesc un principiu ca al functiei void swap, unde fisierul curent devine "vechi"
+                if(snap == -1) // in caz de eroare returneaza -1
                 {
-                    eroare("Nu s-a putut redenumi fisierul curent ca cel vechi."); // apelam functia eroare si precizam ce mai exact nu a mers
+                    eroare("Fisierul nu a putut fi deschis/creat."); // apelam functia eroare si precizam ce mai exact nu a mers
                 }
 
-                if(rename(nume_snapshot_temporar, nume_snapshot) != 0) // fisierul temporar devine cel curent
-                {
-                    eroare("Nu s-a putut redenumi fisierul temporar ca cel curent."); // apelam functia eroare si precizam ce mai exact nu a mers
-                }
-
-                fprintf(fisier_com, "Au fost detectate modificari: %s a fost redenumit %s\n", nume_snapshot, nume_snapshot_vechi); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+                fprintf(fisier_com, "Fisierul de snapshot a fost creat cu succes: %s.\n", nume_snapshot); // mesaj afisat in fisier pentru a urmari flow-ul executiei
             }
-            else // daca functia mea de comparare a returnat 0, inseamna ca fisierele mele sunt identice si nu mai am nevoie de snapshot-ul temporar 
+            else // daca open a returnat o valoare nenegativa inseamna ca aveam deja un fisier de snapshot din rulari anterioare
             {
-                if(unlink(nume_snapshot_temporar) == -1) // incerc sa sterg fisierul temporar si verific daca stergerea s-a produs cu succes, daca nu, va returna -1
+                snap = open(nume_snapshot_temporar, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, S_IRUSR | S_IWUSR | S_IROTH | S_IRGRP); // deschide fisierul temporar de snapshot numai pentru scriere (O_WRONLY), il creeaza daca nu exista deja (O_CREAT) si daca fisierul exista, continutul lui este sters (O_TRUNC); daca exista, adauga la sfarsitul sau (O_APPEND)
+                // permisiunile pentru acest fisier snap sunt: read si write pt user, doar read pt group si other
+                // am combinat constante folosind operatorul sau ('|'), pentru a seta mai multi biti
+                // in caz de succes, open returneaza un descriptor de fisier
+
+                if(snap == -1) // in caz de eroare returneaza -1
                 {
-                    eroare("Nu s-a putut sterge snapshot-ul temporar."); // apelam functia eroare si precizam ce mai exact nu a mers
+                    eroare("Fisierul nu a putut fi deschis/creat."); // apelam functia eroare si precizam ce mai exact nu a mers
                 }
 
-                fprintf(fisier_com, "Nu a aparut nici o modificare in directorul %s.\n", director); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+                fprintf(fisier_com, "Fisierul temporar a fost creat cu succes: %s.\n", nume_snapshot_temporar); // mesaj afisat in fisier pentru a urmari flow-ul executiei
             }
-        }
-        else // daca open a returnat o valoare negativa inseamna ca nu s-a putut deschide fisierul temporar, deci fie este inexistent si ma aflu la prima rulare, fie au aparut erori
-        {
-            fprintf(fisier_com, "Snapshot-ul temporar nu exista, deoarece e prima rulare.\n"); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+
+            // stocam informatiile directorului argument
+
+            dir.dimensiune = st.st_size;                    // atribuie campului dimensiune din struct director valoarea preluata din st.st_size
+            dir.data_modificare = st.st_mtime;              // atribuie campului data_modificare din struct director timestamp-ul preluat din st.st_mtime
+            dir.ultima_accesare = st.st_atime;              // atribuie campului ultima_accesare din struct director timestamp-ul preluat din st.st_atime
+            dir.inode = st.st_ino;                          // atribuie campului inode din struct director valoarea preluata din st.st_ino
+            const char *p_init = prelucrare_permisiuni(st); // atribuie unui pointer p_init de tip char valoarea returnata de functia prelucrare_permisiuni, dand ca parametru struct stat-ul definit mai sus
+
+            char buffer[5000]; // buffer care va retine informatia formatata
+            char *modificare_initial = ctime(&dir.data_modificare); // atribuie unui pointer modificare_initial de tip char timestamp-ul obtinut prin prelucrarea cu ctime a valorii din campul data_modificare
+            char *accesare_initial = ctime(&dir.ultima_accesare); // atribuie unui pointer accesare_initial de tip char timestamp-ul obtinut prin prelucrarea cu ctime a valorii din campul ultima_accesare
+            snprintf(buffer, sizeof(buffer), "Director initial\nNume: %s\nDimensiune: %ld bytes\nModificare: %sUltima accesare: %sInode: %ld\nPermisiuni: %s\n\n", director, dir.dimensiune, modificare_initial, accesare_initial, dir.inode, p_init); // folosesc snprintf ca sa obtin un string formatat asa cum vreau eu
+
+            ssize_t written_bytes = write(snap, buffer, strlen(buffer)); // scrie in fisier informatia formatata
+            if(written_bytes == -1) // daca am obtinut -1 inseamna ca apelul write() s-a terminat cu eroare
+            {
+                eroare("Eroare la scrierea informatiilor despre director in snapshot."); // apelam functia eroare si precizam ce mai exact nu a mers
+            }
+
+            // apelez functia mea recursiva care parcurge subarborele
+            parcurgere_recursiva(director, snap, 1);
+
+            // inchid fisierul de snapshot pentru ca am adaugat tot ce era nevoie in el
+            // functia close returneaza 0 in caz de succes, -1 in caz de eroare
+
+            if(close(snap) == -1) // verificam daca a esuat inchiderea fisierului 
+            {
+                eroare("Eroare la inchiderea snapshot-ului."); // alta self-explanatory
+            }
+
+            snap = open(nume_snapshot_temporar, O_RDONLY); // deschide fisierul temporar de snapshot numai pentru citire (O_RDONLY)
+
+            if(snap >= 0) // daca open a returnat o valoare nenegativa, inseamna ca exista un fisier temporar de snapshot, deci clar si un snapshot anterior
+            { 
+                if(close(snap) == -1) // inchid fisierul temporar de snapshot pentru ca am determinat daca exista sau nu si tin cont ca functia close returneaza 0 in caz de succes, -1 in caz de eroare
+                {
+                    eroare("Eroare la inchiderea fisierului temporar."); // apelam functia eroare si precizam ce mai exact nu a mers
+                }
+
+                if(compara_snapi(nume_snapshot, nume_snapshot_temporar) == 1) // apelez functia de comparare a snapshot-urilor si verific daca returneaza 1, adica daca imi spune ca snapshot-urile sunt diferite
+                {
+                    if(rename(nume_snapshot, nume_snapshot_vechi) != 0) // folosesc un principiu ca al functiei void swap, unde fisierul curent devine "vechi"
+                    {
+                        eroare("Nu s-a putut redenumi fisierul curent ca cel vechi."); // apelam functia eroare si precizam ce mai exact nu a mers
+                    }
+
+                    if(rename(nume_snapshot_temporar, nume_snapshot) != 0) // fisierul temporar devine cel curent
+                    {
+                        eroare("Nu s-a putut redenumi fisierul temporar ca cel curent."); // apelam functia eroare si precizam ce mai exact nu a mers
+                    }
+
+                    fprintf(fisier_com, "Au fost detectate modificari: %s a fost redenumit %s\n", nume_snapshot, nume_snapshot_vechi); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+                }
+                else // daca functia mea de comparare a returnat 0, inseamna ca fisierele mele sunt identice si nu mai am nevoie de snapshot-ul temporar 
+                {
+                    if(unlink(nume_snapshot_temporar) == -1) // incerc sa sterg fisierul temporar si verific daca stergerea s-a produs cu succes, daca nu, va returna -1
+                    {
+                        eroare("Nu s-a putut sterge snapshot-ul temporar."); // apelam functia eroare si precizam ce mai exact nu a mers
+                    }
+
+                    fprintf(fisier_com, "Nu a aparut nici o modificare in directorul %s.\n", director); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+                }
+            }
+            else // daca open a returnat o valoare negativa inseamna ca nu s-a putut deschide fisierul temporar, deci fie este inexistent si ma aflu la prima rulare, fie au aparut erori
+            {
+                fprintf(fisier_com, "Snapshot-ul temporar nu exista, deoarece e prima rulare.\n"); // mesaj afisat in fisier pentru a urmari flow-ul executiei
+            }
+
+            exit(nr_fisiere_malitioase);
         }
     }
+
+    int process_number = 1; // variabila care sa ne retina numarul proceselor copil pentru a stabili o oarecare ordine 
+
+    do
+    {
+        w = wait(&status); // asteapta finalizarea oricarui proces copil si ii preia starea 
+
+        if(w == -1) // daca a esuat aceasta asteptare
+        {   
+            if(errno != ECHILD) // verifica daca eroarea nu este cumva cauzata de absenta proceselor copil
+            {
+                eroare("Operatia nu s-a putut efectua."); // apelam functia eroare si precizam ce mai exact nu a mers
+            }
+            break; // intrerupe executia lui do-while
+        }
+
+        if(WIFEXITED(status)) // daca procesele copil s-au terminat cu succes 
+        {
+            fprintf(fisier_com, "S-au detectat %d fisiere malitioase.\n", WEXITSTATUS(status)); // afisam cate fisiere malitioase a returnat fiecare proces copil
+            fprintf(fisier_com, "Child process %d terminated with PID %d\n", process_number++, w); // afisam care proces copil s a terminat cu ce pid 
+        } 
+
+    } while(21);
 
     fclose(fisier_com); // inchid fisierul in care am scris comentariile 
 
